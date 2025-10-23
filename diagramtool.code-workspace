@@ -1,0 +1,45 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "localhost-healthshare:HSCUSTOM",
+			"uri": "isfs://localhost-healthshare:hscustom/"
+		}
+	],
+	"settings": {
+		"objectscript.conn": {
+			"server": "localhost",
+			"ns": "HSCUSTOM",
+			"active": true
+		},
+		"objectscript.serverSourceControl.respectEditableStatus": true,
+		"objectscript.openClassContracted": true,
+		"objectscript.overwriteServerChanges": true,
+		
+		"objectscript.compileFlags": "bckry",
+"intersystems.servers": {
+			"/default": "localhost-healthshare",
+			"localhost-healthshare": {
+				"webServer": {
+					"scheme": "http",
+					"host": "localhost",
+					"port": 8880
+				},
+				"username": "_SYSTEM",
+				"password": "_SYSTEM"
+			}
+		},
+		"files.exclude": {
+			"**/.git": true,
+			"**/.svn": true,
+			"**/.hg": true,
+			"**/.DS_Store": true,
+			"**/Thumbs.db": true,
+			"**/*.git": true,
+			"**/CVS": true,
+			"src/%*": true
+		}
+	}
+}

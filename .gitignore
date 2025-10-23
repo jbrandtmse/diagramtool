@@ -1,0 +1,91 @@
+# ----------------------------
+# General OS and Editor cruft
+# ----------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editors/IDEs
+.vscode/
+.idea/
+*.iml
+
+# Swap/backup/temp files
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
+
+# ----------------------------
+# Node / Frontend (safe defaults)
+# ----------------------------
+node_modules/
+.pnpm-store/
+dist/
+build/
+.cache/
+.turbo/
+.parcel-cache/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env files (keep secrets out of git)
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ----------------------------
+# Python (safe defaults)
+# ----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# ----------------------------
+# Misc caches
+# ----------------------------
+.eslintcache
+.stylelintcache

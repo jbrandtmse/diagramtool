@@ -1,0 +1,32 @@
+# Normalize line endings and auto-detect text files
+* text=auto
+
+# Enforce LF for Unix-y files
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.py text eol=lf
+
+# Keep CRLF for Windows batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat common binary formats as binary (no diffs, no EOL conversions)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.zip binary
+*.gz  binary
+*.7z  binary
+*.jar binary
