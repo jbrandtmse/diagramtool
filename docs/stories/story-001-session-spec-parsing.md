@@ -1,7 +1,7 @@
 # Story ST-001 — Session Spec Parsing
 
-Status: Draft
-Epic/PRD: docs/prd.md (v4), shards 20-functional-requirements.md (FR-01), 60-acceptance-criteria.md (AC-01)
+Status: Ready for Development
+Epic/PRD: docs/prd.md (v4), shards docs/prd/20-functional-requirements.md#fr-01-session-spec-parsing (FR-01), docs/prd/60-acceptance-criteria.md#ac-01-session-spec-parsing (AC-01)
 Owners: SM (Bob), PO (Sarah), Dev (James), QA (Quinn)
 
 Story
@@ -29,7 +29,7 @@ Assumptions
 - Ranges use a hyphen (e.g., 5-9).
 
 Dependencies
-- PRD v4: FR-01 (Session Spec Parsing), AC-01.
+- PRD v4: [FR-01](docs/prd/20-functional-requirements.md#fr-01-session-spec-parsing) (Session Spec Parsing), [AC-01](docs/prd/60-acceptance-criteria.md#ac-01-session-spec-parsing).
 - Upcoming stories consume this output (ordering, correlation, builder).
 
 Acceptance Criteria (from PRD 60-acceptance-criteria.md)
@@ -54,9 +54,13 @@ Non-Functional References
 - Testability via %UnitTest (NFR-05).
 
 Tasks (Draft)
-T1. Implement parser utility (pure function or class method)
-- Input: string (e.g., "1,5-7,12")
-- Output: ordered list of integers (unique or as-entered? MVP: include duplicates only if explicitly required; PRD does not require uniqueness → keep duplicates if present)
+T1. Implement parser utility in MALIB.Util.DiagramTool.cls
+- Target: src/MALIB/Util/DiagramTool.cls
+- Add: ClassMethod ParseSessionSpec(pSelector As %String = "") As %List
+- Return type: %List (built via $LISTBUILD) containing positive integers
+- Ordering: numeric ascending; duplicates preserved if present
+- Error handling: ignore invalid tokens (non-numeric, empty) and invalid ranges (a>b) without error; whitespace-insensitive
+- Examples: "1, 5-7, 12" → $LB(1,5,6,7,12); "2-2" → $LB(2); "3-1" → $LB()
 
 T2. Robust tokenization and validation
 - Trim whitespace and ignore empty tokens
@@ -86,4 +90,5 @@ QA Notes (Placeholder)
 - Consider boundary values (very large IDs, leading zeros).
 
 Change Log
+- v0.2 Marked Ready for Development after Story Draft Checklist PASS
 - v0.1 Draft created (BMAD docs-first).
