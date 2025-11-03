@@ -1,8 +1,8 @@
 # Story ST-002 — Data Load & Deterministic Ordering (SQL-only)
 
-Status: Draft
+Status: Ready for Development
 Epic/PRD: docs/prd.md (v4)
-Shards: 
+Shards:
 - 20-functional-requirements.md (FR-02, FR-03, FR-09)
 - 40-data-sources-and-mapping.md
 - 60-acceptance-criteria.md (AC-02, AC-09)
@@ -26,6 +26,55 @@ Scope (Decisions-aligned)
   - Fallback deterministically to ORDER BY ID when TimeCreated ordering isn’t available.
 - Result normalization:
   - Provide rows as a consistent structure for downstream processing (correlation and diagram builder).
+
+Implementation Target and Contract
+- Class: MALIB.Util.DiagramTool
+- Method (new):
+  - ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %DynamicArray, pForceIdOnlyOrder As %Boolean = 0) As %Status
+- Contract:
+  - Input: pSessionId (single SessionId)
+  - Behavior: Query Ens.MessageHeader with required columns, filter out HS.Util.Trace.Request, apply deterministic ordering
+  - Ordering:
+    - Default: ORDER BY TimeCreated, ID
+    - Fallback: ORDER BY ID when TimeCreated cannot be used (older IRIS versions or environments)
+    - Optional explicit fallback: pForceIdOnlyOrder=1 forces ORDER BY ID in tests or legacy deployments
+  - Output: pRows is a %DynamicArray of normalized row objects (see schema below)
+  - Return: %Status (OK on success; non-OK if SQL error or unexpected failure). Non-fatal data conditions should not cause failure (best-effort philosophy).
+
+Normalized Row Schema (per element in pRows)
+- ID: %Integer
+- Invocation: %String ("Inproc" | "Queue" | other → preserved as-is; downstream may warn)
+- MessageBodyClassName: %String (full class name including package)
+- SessionId: %Integer
+- SourceConfigName: %String
+- TargetConfigName: %String
+- ReturnQueueName: %String or "" when null
+- CorrespondingMessageId: %Integer or "" when null
+- TimeCreated: %String or %TimeStamp (normalized to a consistent textual representation if needed by tests)
+- Type: %String ("Request" | "Response")
+
+Query and Ordering Strategy
+- Primary query (preferred):
+  SELECT
+    ID, Invocation, MessageBodyClassName, SessionId,
+    SourceConfigName, TargetConfigName,
+    ReturnQueueName, CorrespondingMessageId,
+    TimeCreated, Type
+  FROM Ens.MessageHeader
+  WHERE SessionId = ?
+    AND MessageBodyClassName <> 'HS.Util.Trace.Request'
+  ORDER BY TimeCreated, ID;
+
+- Fallback query (when TimeCreated ordering is not available):
+  SELECT
+    ID, Invocation, MessageBodyClassName, SessionId,
+    SourceConfigName, TargetConfigName,
+    ReturnQueueName, CorrespondingMessageId,
+    TimeCreated, Type
+  FROM Ens.MessageHeader
+  WHERE SessionId = ?
+    AND MessageBodyClassName <> 'HS.Util.Trace.Request'
+  ORDER BY ID;
 
 Out of Scope (MVP)
 - Correlation logic (covered in ST-003).
@@ -65,33 +114,60 @@ Non-Functional References
 - Resilience and best-effort behavior downstream (warnings emitted later by builder; NFR-03).
 - Testability (NFR-05).
 
+References (Anchored)
+- FR-02 Data Source and Filtering (SQL-only): docs/prd/20-functional-requirements.md#fr-02-data-source-and-filtering-sql-only
+- FR-03 Ordering and Determinism: docs/prd/20-functional-requirements.md#fr-03-ordering-and-determinism
+- FR-09 Per-Session Diagram Generation: docs/prd/20-functional-requirements.md#fr-09-per-session-diagram-generation
+- AC-02 Ordering Determinism (SQL-only): docs/prd/60-acceptance-criteria.md#ac-02-ordering-determinism-sql-only
+- Canonical SQL: docs/prd/40-data-sources-and-mapping.md#2-canonical-sql
+
+Test Dataset Plan (Definition of Ready details)
+Provide or identify a dev namespace with a session (or seed data) that exercises:
+1) Filtering
+   - At least one row with MessageBodyClassName = 'HS.Util.Trace.Request' that must be excluded.
+2) Ordering and tie-break
+   - At least two rows sharing identical TimeCreated but different IDs to validate secondary ordering by ID.
+3) Mixed Types/Invocation
+   - A mixture of Request/Response and Inproc/Queue values to confirm determinism does not regress with value variety.
+
+Options:
+- Real data: Use docs/sample.sql as a starting point to query a known session (e.g., 1584253) and verify ordering.
+- Seeded data (preferred for unit tests): Insert a minimal dataset into a controlled test environment/table mirroring Ens.MessageHeader schema sufficient for loader behavior validation.
+- Tests should run deterministically independent of wall-clock; normalize TimeCreated to a fixed set in test data where possible.
+
 Tasks (Draft)
 T1. SQL Loader
-- Prepare statement selecting required fields with WHERE SessionId=? AND MessageBodyClassName <> 'HS.Util.Trace.Request'
-- ORDER BY TimeCreated, ID; gracefully fallback to ORDER BY ID if primary ordering unsupported
-- Return normalized row objects suitable for downstream steps
+- Implement MALIB.Util.DiagramTool:LoadHeadersForSession(pSessionId, Output pRows, pForceIdOnlyOrder=0) As %Status
+- Apply filter and deterministic ordering; choose fallback by pForceIdOnlyOrder or by error handling on ORDER BY TimeCreated,ID
+- Normalize output rows to the schema defined above
 
 T2. Unit Tests (%UnitTest)
 - Validate filtering and ordering (primary and fallback)
 - Confirm determinism across multiple runs
+- Include tie-break by ID when TimeCreated matches
+- Include empty/fully filtered session producing an empty result
 
 T3. Documentation
 - Brief developer notes on loader behavior and why ordering is critical for correlation
-- Reference PRD shards 20, 40, and AC-02
+- Reference PRD shards 20, 40, and AC-02 with anchored links
 
 Definition of Ready
 - PRD references stable (FR-02, FR-03, AC-02).
-- Test datasets identified and accessible in dev namespace.
+- Test dataset plan documented above and accessible in dev/test namespace (real session or seeded data).
+- Agreement on method signature, output structure, and fallback behavior captured in this story.
 
 Definition of Done
 - All ACs pass with %UnitTest.
 - SQL loader produces deterministic, filtered outputs.
 - Inline documentation added; story marked Ready for PO review and QA design.
 
-QA Notes (Placeholder)
+QA Notes (Checklist)
 - Verify exclusion rule for HS.Util.Trace.Request.
 - Confirm deterministic ordering using multiple executions and tie-break on ID when TimeCreated matches.
+- Verify fallback behavior by forcing ID-only ordering (pForceIdOnlyOrder=1) in at least one test.
+- Validate normalized schema fields and types for downstream consumption.
 
 Change Log
+- v0.3 Added implementation signature, normalized row schema, anchored references, and concrete test dataset plan.
 - v0.2 Updated to SQL-only (removed CSV references) and aligned with finalized decisions.
 - v0.1 Draft created (BMAD docs-first).
