@@ -1,0 +1,44 @@
+schema: 1
+story: "st.001"
+story_title: "Session Spec Parsing"
+gate: PASS
+status_reason: "AC-01 validated via 11/11 passing unit tests; FR-01 met; deterministic parsing; no issues found."
+reviewer: "Quinn (Test Architect)"
+updated: "2025-11-03T02:27:01Z"
+
+top_issues: []
+
+waiver:
+  active: false
+
+quality_score: 100
+expires: "2025-11-16T00:00:00Z"
+
+evidence:
+  tests_reviewed: 11
+  risks_identified: 0
+  trace:
+    ac_covered: [1]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: "Not applicable (pure parsing; no I/O)."
+  performance:
+    status: PASS
+    notes: "Tokenization + sorting; acceptable complexity for selector sizes."
+  reliability:
+    status: PASS
+    notes: "Deterministic, unit-tested; invalid tokens gracefully ignored."
+  maintainability:
+    status: PASS
+    notes: "Clear logic; documentation update (T4) recommended."
+
+recommendations:
+  immediate: []
+  future:
+    - action: "Add README/usage examples for ParseSessionSpec (T4)"
+      refs: ["README.md", "src/MALIB/Util/DiagramTool.cls"]
+    - action: "Consider Unicode hyphen variants (–, —) support if needed"
+      refs: ["src/MALIB/Util/DiagramTool.cls"]
