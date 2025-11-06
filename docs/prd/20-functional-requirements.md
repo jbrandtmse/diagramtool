@@ -48,8 +48,8 @@ FR-07 Request/Response Correlation
   - If CorrespondingMessageId conflicts, emit a warning and still use order-based pairing.
 - Queue:
   - Prefer CorrespondingMessageId to correlate response to the original request.
-  - Fallback to ReturnQueueName when CorrespondingMessageId absent.
-  - If neither is available, leave unpaired and emit a warning.
+  - Fallback to ReturnQueueName only when reversed Source/Target relative to the request (response direction Dst → Src).
+  - If neither is available, or the reversed-endpoints check fails, leave unpaired and emit a warning.
 - Correlation proceeds forward-only through the ordered list (no backtracking).
 
 FR-08 Loop Detection and Compression

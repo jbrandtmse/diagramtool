@@ -66,3 +66,33 @@ Performance guidance
   - Composite index `(SessionId, TimeCreated, ID)` for primary ordering
   - Secondary index `(SessionId, ID)` to support the ID-only fallback
 - See PRD shard for details: docs/prd/40-data-sources-and-mapping.md#13-indexing-guidance
+
+### ST-003 — Correlation Rules (Inproc vs Queue, Warnings)
+
+Correlate request/response interactions for synchronous ("Inproc") and queued ("Queue") traces, producing an ordered event list for diagram emission, with best‑effort warnings instead of hard failures.
+
+Key behaviors
+- Forward‑only scan across ordered rows from ST‑002
+- Inproc: reversed endpoints with Type="Response"; confirm CorrMsgId; conflict warns but still pairs by order
+- Queue: primary correlation via CorrespondingMessageId; fallback via ReturnQueueName; both legs async (`-->>`)
+- Unknown Invocation: warn and default to sync arrow (`->>`)
+- Deterministic outputs assuming ST‑002 ordering
+
+Artifacts
+- Story: docs/stories/story-003-correlation-rules.md
+- Dev Notes: docs/dev-notes-correlation.md
+- Developer Handoff: docs/hand-offs/hand-off-st-003.md
+- QA Gate: docs/qa/gates/st.003-correlation-rules.yml
+
+PRD/AC references
+- FR-06 (Invocation → Arrow): docs/prd/20-functional-requirements.md#fr-06-invocation--arrow-semantics-strict-recognition
+- FR-07 (Correlation rules): docs/prd/20-functional-requirements.md#fr-07-requestresponse-correlation
+- Diagram rules (arrows/direction/warnings): docs/prd/50-diagramming-rules.md#5-arrow-semantics-invocation--arrow
+- AC-05: docs/prd/60-acceptance-criteria.md#ac-05-invocation-handling-strict-recognition
+- AC-06: docs/prd/60-acceptance-criteria.md#ac-06-inproc-correlation-with-confirmation
+- AC-07: docs/prd/60-acceptance-criteria.md#ac-07-queued-correlation-and-async-arrows
+- AC-09: docs/prd/60-acceptance-criteria.md#ac-09-per-session-diagram-structure
+- AC-13: docs/prd/60-acceptance-criteria.md#ac-13-error-handling-and-best-effort
+
+Implementation status
+- SM did not change code (per role constraint). Development is to be performed by the dev agent using the above artifacts (contracts, schema, tests plan).

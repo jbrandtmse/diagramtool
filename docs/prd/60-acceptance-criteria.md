@@ -49,8 +49,8 @@ AC-07 Queued Correlation and Async Arrows
 - Given queued interactions with Invocation = "Queue"
 - When correlating queued requests and responses
 - Then CorrespondingMessageId is used as the primary correlation key
-- And when CorrespondingMessageId is missing, ReturnQueueName is used as fallback
-- And if neither is available, the response remains unpaired and a "%%" warning is emitted
+- And when CorrespondingMessageId is missing, ReturnQueueName is used as fallback only when reversed endpoints match the request (response direction Dst → Src)
+- And if neither is available, or the reversed-endpoints check fails, the response remains unpaired and a "%%" warning is emitted
 - And both the request and response arrows are async (-->>) for queued pairs
 
 AC-08 Loop Detection and Compression

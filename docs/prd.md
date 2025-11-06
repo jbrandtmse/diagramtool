@@ -23,7 +23,7 @@ Decisions (Finalized)
   - Queue: both legs (request and response) are async -->> (response always async regardless of the response row Invocation).
 - Correlation:
   - Inproc: forward-scan, reversed Source/Target with Type="Response"; CorrespondingMessageId confirms if present; if it conflicts, warn and still use order-based pairing.
-  - Queue: CorrespondingMessageId primary; ReturnQueueName fallback; if neither, leave unpaired and emit a warning.
+  - Queue: CorrespondingMessageId primary; ReturnQueueName fallback only when reversed endpoints match the request (response direction Dst → Src); if neither, or the reversed-endpoints check fails, leave unpaired and emit a warning.
 - Exclusions:
   - Exclude HS.Util.Trace.Request only (no configurable exclude list in MVP).
 - SuperSession:
@@ -62,7 +62,7 @@ Implementation Guidance Snapshot (see shards for details)
 - Invocation: strict recognition: Inproc ->>, Queue -->> (both legs).
 - Correlation:
   - Inproc: order + reversed endpoints; CorrMsgId confirms, conflict warns but still use order.
-  - Queue: CorrMsgId → ReturnQueueName; if neither present, unpaired + warn.
+  - Queue: CorrMsgId → ReturnQueueName only when reversed endpoints match the request (response direction Dst → Src); if neither present, or reversed-endpoints check fails, unpaired + warn.
 - Loop detection: compress contiguous request/response identical signature pairs into loop blocks.
 - Output: append-only; divider comment (%% ---) between diagrams; dedup ON and silent; warnings as %% comments.
 

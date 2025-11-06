@@ -79,8 +79,8 @@ Related: ../prd.md, 00-overview.md, 20-functional-requirements.md
   - If CorrespondingMessageId conflicts, emit a warning and still use order-based pairing
 - Queue (asynchronous/queued)
   - Prefer CorrespondingMessageId to match response to request
-  - Fallback: ReturnQueueName equality when CorrespondingMessageId is missing
-  - If neither present, leave unpaired and emit a warning
+  - Fallback: ReturnQueueName equality when CorrespondingMessageId is missing AND reversed endpoints match (response direction Dst → Src)
+  - If neither present, or the reversed-endpoints check fails, leave unpaired and emit a warning
   - Maintain directionality and timing: response may arrive later; continue forward scan
 
 7) Loop Detection Inputs

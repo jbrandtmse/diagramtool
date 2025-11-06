@@ -1,0 +1,48 @@
+schema: 1
+story: "st.003"
+story_title: "Correlation Rules (Inproc vs Queue, Warnings)"
+gate: "REVIEW_PENDING"
+status_reason: "Story updated with implementation target, event schema, and anchored references; policy decisions recorded (Queue fallback requires reversed endpoints; emit standalone Inproc responses); development implementation and unit tests pending (AC-05/06/07/09/13)."
+reviewer: "Bob (Scrum Master) — Gate prepared; QA reviewer TBD"
+updated: "2025-11-06T02:58:30Z"
+
+top_issues:
+  - "Implementation contract present; correlation code to be implemented by dev agent."
+  - "Unit tests for AC-05/06/07 not yet authored."
+  - "Warning emission formatting and placement to be verified in downstream emitter."
+
+waiver:
+  active: false
+
+quality_score: 75
+expires: "2025-11-20T00:00:00Z"
+
+evidence:
+  tests_reviewed: 0
+  risks_identified: 2
+  trace:
+    ac_covered: [5, 6, 7, 9, 13]
+    ac_gaps: [5, 6, 7, 9, 13]
+
+nfr_validation:
+  security:
+    status: PENDING
+    notes: "No code changes in this gate; validation deferred to implementation."
+  performance:
+    status: PENDING
+    notes: "Forward-only scan expected; validate with representative datasets."
+  reliability:
+    status: PENDING
+    notes: "Determinism depends on ST-002 ordering; validate event list stability."
+  maintainability:
+    status: PENDING
+    notes: "Contracts and schema documented; unit tests will codify expectations."
+
+recommendations:
+  immediate:
+    - "Implement correlation methods in MALIB.Util.DiagramTool (ArrowForInvocation, CorrelateEvents, PairInproc, PairQueued) — by dev agent."
+    - "Add %UnitTest cases covering AC-05/06/07 and edge cases: CorrMsgId conflict (Inproc), ReturnQueue fallback (Queue), unpaired queued response, unknown Invocation warning."
+    - "Ensure warnings surface as '%%' comments by emitter following docs/prd/50-diagramming-rules.md."
+  future:
+    - "Add diagnostics for ambiguous Queue matches and correlation confidence."
+    - "Evaluate performance on large sessions; optimize scanning if necessary."
