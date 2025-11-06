@@ -126,6 +126,27 @@ Related: ../prd.md, 00-overview.md, 20-functional-requirements.md
 - Emit '%%' warnings when correlation falls back or is skipped
 - Avoid throwing on partial data; return best-effort diagrams
 
+13) Indexing Guidance
+- Goals
+  - Accelerate filtering on SessionId and stable ordering for the loader’s primary and fallback queries
+  - Avoid full table scans on large Ens.MessageHeader datasets
+- Recommended indexes (if environment allows adding indexes to Ens.MessageHeader)
+  - Primary ordering path: composite index on (SessionId, TimeCreated, ID)
+  - Fallback ordering path: composite index on (SessionId, ID)
+- Example DDL
+  ```sql
+  -- Primary: supports WHERE SessionId = ? ... ORDER BY TimeCreated, ID
+  CREATE INDEX idx_mh_sess_time_id ON Ens.MessageHeader (SessionId, TimeCreated, ID);
+
+  -- Fallback: supports WHERE SessionId = ? ... ORDER BY ID
+  CREATE INDEX idx_mh_sess_id ON Ens.MessageHeader (SessionId, ID);
+  ```
+- Operational notes
+  - Ensure appropriate privileges before creating indexes
+  - After index changes, update statistics (e.g., TUNE TABLE Ens.MessageHeader) and validate plans with EXPLAIN
+  - The filter `MessageBodyClassName <> 'HS.Util.Trace.Request'` is non-selective; plan quality should primarily leverage SessionId plus ordering columns
+  - If modifying Ens.MessageHeader is restricted, validate that equivalent indexes already exist in the target environment, or consider a read-optimized replica if policy permits
+
 Traceability
 - Maps to FR-02 (Data Source), FR-03 (Ordering), FR-04 (Actors), FR-05 (Labels), FR-06 (Arrows), FR-07 (Correlation), FR-08 (Loops), FR-09 (Per-session), FR-10/11 (Dedup + append-only)
 - Aligns with NFR-02 (Determinism), NFR-03 (Resilience), NFR-05 (Testability)

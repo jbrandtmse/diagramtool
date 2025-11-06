@@ -1,6 +1,6 @@
 # Story ST-002 — Data Load & Deterministic Ordering (SQL-only)
 
-Status: Ready for Development
+Status: Done
 Epic/PRD: docs/prd.md (v4)
 Shards:
 - 20-functional-requirements.md (FR-02, FR-03, FR-09)
@@ -168,6 +168,49 @@ QA Notes (Checklist)
 - Validate normalized schema fields and types for downstream consumption.
 
 Change Log
+- v1.0 Marked Done; QA Gate PASS; README dev note and PRD indexing guidance; 22/22 unit tests passing; gate created (docs/qa/gates/st.002-data-load-and-ordering.yml).
+- v0.4 Marked Ready for Review; implemented loader and added exhaustive unit tests covering filtering, deterministic ordering with fallback, tie-break by ID, null normalization, invalid session IDs, and field preservation (Invocation).
 - v0.3 Added implementation signature, normalized row schema, anchored references, and concrete test dataset plan.
 - v0.2 Updated to SQL-only (removed CSV references) and aligned with finalized decisions.
 - v0.1 Draft created (BMAD docs-first).
+
+## QA Results
+
+### Review Date: 2025-11-05
+### Reviewed By: Quinn (Test Architect)
+
+### Code Quality Assessment
+- Implementation matches FR-02, FR-03, FR-09 and satisfies AC-02.
+- Embedded SQL applies required filter (excludes HS.Util.Trace.Request) and deterministic ordering.
+- Fallback behavior is correct: default ORDER BY TimeCreated, ID; forced/legacy fallback ORDER BY ID via pForceIdOnlyOrder or if C1 open fails.
+- Output normalization returns %DynamicArray of objects; optional fields (ReturnQueueName, CorrespondingMessageId) normalized to empty string.
+- Best-effort philosophy respected: invalid/non-positive SessionId returns empty results with $$$OK.
+
+### Test Evidence
+- 11 ST-002 tests passed (22/22 total in MALIB.Test.DiagramToolTest).
+- Covered: primary ordering, forced fallback ordering, tie-break by ID, exclusion filter, determinism across calls, null normalization, invalid SessionId handling, and Invocation value preservation.
+
+### Compliance Check
+- Coding Standards: ✓
+- Project Structure: ✓
+- Testing Strategy: ✓ (comprehensive %UnitTest coverage)
+- All ACs Met: ✓ (AC-02 Ordering Determinism)
+
+### NFR Validation
+- Security: PASS (read-only SQL against Ens.MessageHeader).
+- Performance: PASS for expected dev/test volumes; recommend ensuring suitable index strategy (e.g., composite on SessionId, TimeCreated, ID) for production-scale datasets.
+- Reliability: PASS (deterministic and unit-tested).
+- Maintainability: PASS (clear method contract and inline documentation).
+
+### Improvements Checklist
+- [ ] Add a brief README/dev note explaining fallback ordering and how to force it in tests via pForceIdOnlyOrder.
+- [ ] Optional: Document assumed indexing on Ens.MessageHeader (SessionId, TimeCreated, ID) to avoid full scans at scale.
+
+### Files Modified During Review
+- docs/qa/gates/st.002-data-load-and-ordering.yml (to be created)
+
+### Gate Status
+Gate: PASS → qa.qaLocation/gates/st.002-data-load-and-ordering.yml
+
+### Recommended Status
+[✓ Ready for Done] (functionality complete; add minor documentation noted above)
