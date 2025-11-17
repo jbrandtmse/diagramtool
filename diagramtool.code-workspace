@@ -5,7 +5,7 @@
 		},
 		{
 			"name": "localhost-healthshare:HSCUSTOM",
-			"uri": "isfs://localhost-healthshare:hscustom/"
+			"uri": "isfs://localhost-healthshare:hscustom/?system=1"
 		}
 	],
 	"settings": {

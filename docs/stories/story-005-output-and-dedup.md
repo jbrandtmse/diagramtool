@@ -51,6 +51,7 @@ Dependencies
 - ST-002: SQL-only data loading and ordering
 - ST-003: correlation (Inproc confirm, Queue CorrMsgId→ReturnQueueName, unpaired warnings)
 - ST-004: loop detection (contiguous identical pairs)
+- ST-006: orchestration & public entry API (`GenerateDiagrams`) that invokes this story's output/dedup/labeling behavior as part of the main pipeline
 
 Acceptance Criteria (mapped from PRD 60-acceptance-criteria.md)
 AC-04 Labeling Defaults and Toggle

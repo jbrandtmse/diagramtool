@@ -11,9 +11,10 @@ Purpose
 System Context
 - A library (no UI) that generates Mermaid sequence diagrams from IRIS Interoperability trace sessions (Ens.MessageHeader).
 - Input: Session selector string (single IDs, ranges, lists) parsed to a set of SessionIds.
+- Public orchestration entrypoint (ST-006): `MALIB.Util.DiagramTool.GenerateDiagrams(pSelector, pOutFile, pLabelMode, pDedupOn, .pText)` wires together parsing, loading, correlation, loop detection, and output/dedup according to the PRD.
 - Data load (ST-002): SQL-only loader reads Ens.MessageHeader, filters HS.Util.Trace.Request, applies deterministic ordering (TimeCreated, ID) with ID-only fallback.
 - Correlation (ST-003): Inproc and Queue pairing with strict rules and best-effort warnings.
-- Loop detection (ST-004) and output/append/dedup (ST-005) come later in the sequence.
+- Loop detection (ST-004) and output/append/dedup (ST-005) come later in the sequence and are invoked from the orchestration entrypoint.
 
 Key Decisions (aligned with PRD v4)
 - Invocation handling (strict): Inproc (->>) and Queue (-->>) both legs async for queued pairs.
