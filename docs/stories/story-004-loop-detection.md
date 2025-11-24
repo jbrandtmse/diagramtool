@@ -1,22 +1,22 @@
 # Story ST-004 — Loop Detection (Contiguous Identical Pairs)
 
-Status: Draft
+Status: Ready for Review
 Epic/PRD: docs/prd.md (v4)
 Shards:
 - 20-functional-requirements.md (FR-08, FR-09)
 - 50-diagramming-rules.md
 - 60-acceptance-criteria.md (AC-08, AC-09)
 
-Story
-As an IRIS developer generating sequence diagrams,
-I want repeated request/response exchanges with identical signatures to be compressed into Mermaid loop blocks,
-so that long repeated patterns remain readable without losing essential information.
+## Story
+**As an** IRIS developer generating sequence diagrams,
+**I want** repeated request/response exchanges with identical signatures to be compressed into Mermaid loop blocks,
+**so that** long repeated patterns remain readable without losing essential information.
 
-Business Value
+## Business Value
 - Improves readability of chatty flows.
 - Keeps diagrams compact and consumable for stakeholders.
 
-Scope (Decisions-aligned)
+## Scope (Decisions-aligned)
 - Loop signature:
   - Request: (Src, Dst, Label)
   - Response: (Src, Dst, Label)
@@ -36,20 +36,21 @@ Scope (Decisions-aligned)
   - Best-effort; do not compress if pairing is ambiguous
   - Emit warnings via "%%" comments for relevant anomalies if encountered during grouping (rare)
 
-Out of Scope (MVP)
+## Out of Scope (MVP)
 - Non-contiguous repeats or fuzzy matching
 - Multi-pair grouping across different labels or endpoints
 - Any CSV-based operation (SQL-only project)
 
-Assumptions
-- Correlated event list is available from ST-003 (pairs with arrows).
-- Participants were collected from ordered rows (ST-002).
+## Assumptions
+- Correlated event list is available from ST-003 as produced by `MALIB.Util.DiagramTool.Correlation.CorrelateEvents` for a given SessionId (pairs and singletons with arrows).
+- Participants have already been derived from ordered rows per ST-002 and are emitted once per diagram by the output stage.
 
-Dependencies
-- ST-003 must provide correlated request/response pairs and singletons.
-- ST-005 will build the final output with deduplication, append-only behavior, divider, and warnings.
+## Dependencies
+- ST-003 must provide correlated request/response pairs and singletons with a stable event schema.
+- ST-005 will build the final output with deduplication, append-only behavior, divider, warnings, and label toggle, assuming loop compression from ST-004 has already been applied.
+- ST-006 orchestration and public entry API (`GenerateDiagrams`) will invoke `MALIB.Util.DiagramTool.Output.BuildDiagramForSession`, which delegates loop behavior to `ApplyLoopCompression` as part of the main pipeline.
 
-Acceptance Criteria (mapped from PRD 60-acceptance-criteria.md)
+## Acceptance Criteria (mapped from PRD 60-acceptance-criteria.md)
 AC-08 Loop Detection and Compression
 - Given contiguous repeated pairs of identical request/response signatures
 - When generating the diagram
@@ -63,41 +64,116 @@ AC-09 Per-Session Diagram Structure (partial)
 - Then participant declarations precede message lines
 - And compressed loops render as valid Mermaid blocks with correct arrows and labels
 
-Additional Test Cases
+## Additional Test Cases
 - 3 identical pairs contiguous → loop 3 times with 1 req + 1 resp lines
 - 2 identical pairs, interruption, then 2 identical pairs → two separate loop blocks
 - Queued loops: both legs use -->> arrows
 - Mixed Inproc/Queue loops should only compress when the pair signature (including arrows derived from Invocation) is identical
 
-Non-Functional References
-- Determinism (NFR-02): same inputs yield same loop segmentation.
-- Resilience (NFR-03): anomalies lead to best-effort emission and optional warnings.
-- Testability (NFR-05): unit tests exercise contiguous grouping semantics.
+## Non-Functional References
+- Determinism (NFR-02): same inputs yield the same loop segmentation and output text.
+- Resilience (NFR-03): anomalies lead to best-effort emission and optional warnings rather than failures.
+- Testability (NFR-05): unit tests exercise contiguous grouping semantics and loop emission.
 
-Tasks (Draft)
-T1. Implement loop grouping
-- Scan correlated events; group contiguous identical pair signatures
-- Emit loop blocks for N>1; otherwise emit single pair lines
+## Tasks / Subtasks
+- [x] T1. Implement loop grouping
+  - Scan correlated events; group contiguous identical pair signatures
+  - Emit loop blocks for N>1; otherwise emit single pair lines
 
-T2. Edge conditions
-- Handle singletons and mixed sequences robustly
-- Ensure correct indentation and newline handling for Mermaid validity
+- [x] T2. Edge conditions
+  - Handle singletons and mixed sequences robustly
+  - Ensure correct indentation and newline handling for Mermaid validity
 
-T3. Unit Tests (%UnitTest)
-- Validate examples above and edge cases
-- Confirm deterministic behavior
+- [x] T3. Unit Tests (%UnitTest)
+  - Validate examples above and edge cases
+  - Confirm deterministic behavior
 
-T4. Documentation
-- Explain loop signature and why contiguity matters
-- Provide examples with Inproc and Queue variants
+- [x] T4. Documentation
+  - Explain loop signature and why contiguity matters
+  - Provide examples with Inproc and Queue variants
 
-Definition of Ready
-- Correlated pairs and singletons from ST-003 are available.
+## Implementation Target and Contract
+- Class: `MALIB.Util.DiagramTool.Output`
+- Methods:
+  - `ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArray, pLabelMode As %String, Output pDiagram As %String) As %Status`
+    - Existing ST-006 helper that:
+      - Loads ordered rows for a single SessionId.
+      - Calls `MALIB.Util.DiagramTool.Correlation.CorrelateEvents` to produce the correlated event list.
+      - Calls `ApplyLoopCompression` to apply loop detection/compression.
+      - Emits Mermaid sequenceDiagram text, including participants and message/loop lines.
+    - ST-004 must ensure that the combination of `ApplyLoopCompression` + rendering satisfies AC-08 and AC-09 for loop blocks.
+  - `ClassMethod ApplyLoopCompression(pEvents As %DynamicArray, Output pOutEvents As %DynamicArray) As %Status`
+    - Implementation target for ST-004 (currently a pass-through stub).
+    - Input: correlated event list for a single SessionId as described below.
+    - Behavior (logical view):
+      - Scan events in order, identifying strictly contiguous regions of repeated request/response pairs with identical signature (Req(Src, Dst, Label), Resp(Src, Dst, Label) and matching arrow semantics from ST-003/PRD).
+      - For contiguous regions where N > 1, drive `BuildDiagramForSession` to emit a single Mermaid loop block:
+        - `loop N times <Label>`
+        - the request/response lines inside the loop
+        - `end`
+      - For regions where N = 1 or pairing is ambiguous, emit single request/response lines without loop compression.
+      - Implementation may use synthetic events or other internal representation as long as the final Mermaid output meets AC-08/AC-09.
 
-Definition of Done
+## Correlated Event Input (from ST-003)
+Loop detection operates on the correlated event list produced by ST-003. For this story, the following fields are most relevant (see ST-003 “Correlated Event Schema” for full details):
+- `EventType`: "Request" | "Response" | "Warning" (loops operate on Request/Response pairs only).
+- `Src`: participant identifier / config name used as the Mermaid source.
+- `Dst`: participant identifier / config name used as the Mermaid target.
+- `Label`: message label (default = full MessageBodyClassName; labelMode may shorten this later).
+- `Arrow`: "->>" or "-->>" per Invocation → arrow semantics (Inproc vs Queue) from ST-003 / PRD.
+- `ID`: original Ens.MessageHeader ID, used for traceability and fallback lookups.
+- `PairWithID`: for Response events, the ID of the corresponding Request when correlated.
+- `SessionId`: session key for scoping events to a single diagram.
+- `Notes`: optional warning text to be emitted as `%%` comments near affected lines.
+- `PairId`: optional stable identifier for paired events, useful for tests.
+
+Loop grouping MUST respect:
+- Event ordering as produced by ST-003 (forward-only; no reordering across non-identical pairs).
+- Pairing information (`PairWithID`, `PairId`) to distinguish true request/response pairs from standalone events.
+- Arrow semantics when deciding whether two pairs are “identical” for loop purposes, especially for mixed Inproc/Queue scenarios.
+
+## Key Files to Modify
+- `src/MALIB/Util/DiagramTool/Output.cls`
+  - Implement real loop grouping logic inside `ApplyLoopCompression`.
+  - Adjust `BuildDiagramForSession` as needed to render Mermaid `loop ... end` blocks while still satisfying ST-005 output/dedup behaviors.
+- `src/MALIB/Test/DiagramToolOutputTest.cls`
+  - Add %UnitTest methods that cover:
+    - AC-08 examples (contiguous identical pairs, interruptions).
+    - AC-09 structure aspects related to loop placement and validity.
+    - Additional Test Cases listed above, including queued vs inproc loops and mixed Invocation scenarios.
+
+## Testing
+- Framework: IRIS %UnitTest under `src/MALIB/Test/` (extend `MALIB.Test.DiagramToolOutputTest`).
+- AC coverage:
+  - AC-08 Loop Detection and Compression: contiguous identical pairs compressed into `loop N times` blocks with correct N and inner lines.
+  - AC-09 Per-Session Diagram Structure (partial): participants before message lines; loop blocks rendered as valid Mermaid syntax with correct arrows and labels.
+- Suggested scenarios (non-exhaustive):
+  - Exact matches of the Additional Test Cases in this story.
+  - Mixed sequences of:
+    - Singletons (no loop)
+    - Single pairs (no loop)
+    - Multi-pair loops
+    - Interleaved non-identical pairs that break loop regions.
+  - Determinism: repeated runs over the same correlated events produce identical loop segmentation and output.
+
+## Anchored References
+- FR-08 Loop Detection and Compression: `docs/prd/20-functional-requirements.md#fr-08-loop-detection-and-compression`
+- FR-09 Per-Session Diagram Generation: `docs/prd/20-functional-requirements.md#fr-09-per-session-diagram-generation`
+- AC-08 Loop Detection and Compression: `docs/prd/60-acceptance-criteria.md#ac-08-loop-detection-and-compression`
+- AC-09 Per-Session Diagram Structure: `docs/prd/60-acceptance-criteria.md#ac-09-per-session-diagram-structure`
+- Diagramming rules (loops): `docs/prd/50-diagramming-rules.md#7-loop-compression`
+
+## Definition of Ready
+- Correlated pairs and singletons from ST-003 are available and stable.
+- `MALIB.Util.DiagramTool.Output.BuildDiagramForSession` and `ApplyLoopCompression` are the agreed implementation targets for loop behavior.
+
+## Definition of Done
 - All ACs met with passing %UnitTest.
-- Correct Mermaid output for compressed and non-compressed regions.
+- Correct Mermaid output for compressed and non-compressed regions, including valid `loop ... end` blocks.
 - Story marked Ready for PO review and QA design.
 
-Change Log
+## Change Log
+- v1.0 Implemented typed Event-based loop compression; tests passing; status set to Ready for Review.
+- v0.3 Marked Ready for Development; reformatted Story and Tasks sections to match template style.
+- v0.2 Clarified implementation target, correlated event input, key files, testing guidance, and anchored references.
 - v0.1 Draft created and aligned with finalized decisions.

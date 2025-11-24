@@ -106,3 +106,25 @@ Set ^ClineDebug = ^ClineDebug _ "Step 1 completed; "
 6. Use test fixtures for common test data
 7. Always implement %OnNew properly when extending %UnitTest.TestCase
 8. Use debug globals (^ClineDebug) to trace test execution issues
+
+### QA / Gate Review Requirements
+
+When acting as **@qa (Quinn, Test Architect)** and performing a story review or writing/updating a QA gate:
+
+1. **Always run the relevant unit tests before finalizing the review.**
+   - Execute the smallest test scope that fully covers the story (for example, `MALIB.Test.DiagramToolTest` for ST-006, rather than the entire `MALIB.Test` package when that is slow or noisy).
+   - Use the IRIS test runner (via the `iris-execute-mcp` `execute_unit_tests` tool) with the correct `namespace` and `test_spec`.
+
+2. **Record test outcomes in QA artifacts.**
+   - Summarize pass/fail/error counts in the story's **QA Results** section.
+   - Reflect the same status in the corresponding QA gate file under `docs/qa/gates/` (for example, in `tests_reviewed`, `status_reason`, or `top_issues`).
+
+3. **Align gate decisions with test results.**
+   - `gate: PASS` is only allowed when all relevant tests succeed, or when specific failures are explicitly waived and documented with rationale in `top_issues` / `waiver`.
+   - If tests fail or error and are not waived, the gate should be `CONCERNS` or `FAIL`.
+
+4. **If tests cannot be run (environment issues, timeouts, missing IRIS, etc.):**
+   - Document the reason explicitly in the story's **QA Results** and in the gate file (e.g., "Tests not executed: runner timeout").
+   - Treat missing test execution as at least `CONCERNS` until the tests can be run successfully or consciously waived by the team.
+
+This ensures that every @qa review includes actually executing the relevant tests, not just reading them, and that gate decisions are evidence-based.
