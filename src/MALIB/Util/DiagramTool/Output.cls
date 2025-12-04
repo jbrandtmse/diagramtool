@@ -458,6 +458,7 @@ ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util
 }
 
 /// ST-006 helper — Append diagrams to a file with %% --- dividers
+/// ST-005 AC-11: Append-only semantics, divider between diagrams, blank-line separation.
 ClassMethod AppendDiagramsToFile(pOutFile As %String, ByRef pDiagMap) As %Status
 {
     Set tSC = $$$OK
@@ -471,23 +472,38 @@ ClassMethod AppendDiagramsToFile(pOutFile As %String, ByRef pDiagMap) As %Status
         Quit tSC
     }
 
+    ; Determine whether the target file already has content.
+    ; For non-empty files we will emit a divider before the first appended diagram
+    ; so that diagrams from previous runs are separated from new ones.
+    Do stream.Rewind()
+    Set tFirstChar = stream.Read(1)
+    Set tIsEmpty = (tFirstChar="")
     Do stream.MoveToEnd()
 
     Set idx = ""
+    Set tFirstDiag = 1
     For {
         Set idx = $Order(pDiagMap(idx))
         Quit:idx=""
 
-        If idx>1 {
+        Set diag = pDiagMap(idx)
+        Continue:diag=""
+
+        ; Write divider lines:
+        ;  - For the very first diagram appended to a non-empty file, insert one divider.
+        ;  - For subsequent diagrams in this call, always insert a divider between blocks.
+        If tFirstDiag {
+            If 'tIsEmpty {
+                Do stream.WriteLine("%% ---")
+            }
+            Set tFirstDiag = 0
+        } Else {
             Do stream.WriteLine("%% ---")
         }
 
-        Set diag = pDiagMap(idx)
-        If diag'="" {
-            Do stream.Write(diag)
-        }
-
-        ; Ensure there is at least one line break after each diagram block
+        ; Write the diagram text followed by a trailing newline to guarantee
+        ; at least one blank line between diagrams in the combined text view.
+        Do stream.Write(diag)
         Do stream.WriteLine("")
     }
 

@@ -109,14 +109,20 @@ ClassMethod GenerateDiagrams(pSelector As %String, pOutFile As %String = "", pLa
         For i=1:1:tIndex {
             Set diag = tDiag(i)
             If pDedupOn {
-                Set h = $ZCRC(diag,4)
+                ; Use a normalized key that ignores per-session header differences so that
+                ; different SessionIds with identical diagram content can be deduplicated.
+                Set key = ..DiagramDedupKey(diag)
+                If key="" {
+                    Set key = diag
+                }
+                Set h = $ZCRC(key,4)
                 If $Data(tSeen(h)) {
-                    ; Potential hash collision - only treat as duplicate when text is identical
-                    If tSeen(h)=diag {
+                    ; Potential hash collision - only treat as duplicate when normalized text is identical
+                    If tSeen(h)=key {
                         Continue
                     }
                 }
-                Set tSeen(h) = diag
+                Set tSeen(h) = key
             }
             Set tOutIndex = tOutIndex + 1
             Set tOutDiag(tOutIndex) = diag
@@ -169,6 +175,38 @@ ClassMethod LabelForEvent(pEvent As %DynamicObject, pLabelMode As %String = "ful
 ClassMethod AppendDiagramsToFile(pOutFile As %String, ByRef pDiagMap) As %Status
 {
     Quit ##class(MALIB.Util.DiagramTool.Output).AppendDiagramsToFile(pOutFile, .pDiagMap)
+}
+
+/// ST-005/ST-006 helper — Normalize diagram text for deduplication.
+/// Normalizes the per-session header line so that diagrams from different
+/// SessionIds with identical content are considered duplicates.
+ClassMethod DiagramDedupKey(pDiagram As %String) As %String
+{
+    Set key = $Get(pDiagram,"")
+    Quit:key=""
+
+    Set prefix = "%% Session "
+    Set pos = $Find(key, prefix)
+    If pos>0 {
+        Set prefixStart = pos - $Length(prefix)
+        If prefixStart<1 {
+            Set prefixStart = 1
+        }
+        Set len = $Length(key)
+        Set end = len+1
+        For i=pos:1:len {
+            Set ch = $Extract(key,i)
+            If (ch=$Char(13))!(ch=$Char(10)) {
+                Set end = i
+                Quit
+            }
+        }
+        Set before = $Extract(key,1,prefixStart-1)
+        Set after = $Extract(key,end,*)
+        Set key = before_"%% Session <dedup>"_after
+    }
+
+    Quit key
 }
 
 }
