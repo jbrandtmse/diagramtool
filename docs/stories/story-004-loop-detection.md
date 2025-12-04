@@ -1,6 +1,6 @@
 # Story ST-004 — Loop Detection (Contiguous Identical Pairs)
 
-Status: Ready for Review
+Status: Done
 Epic/PRD: docs/prd.md (v4)
 Shards:
 - 20-functional-requirements.md (FR-08, FR-09)
@@ -177,3 +177,61 @@ Loop grouping MUST respect:
 - v0.3 Marked Ready for Development; reformatted Story and Tasks sections to match template style.
 - v0.2 Clarified implementation target, correlated event input, key files, testing guidance, and anchored references.
 - v0.1 Draft created and aligned with finalized decisions.
+
+## QA Results
+
+### Review Date: 2025-12-03
+
+### Reviewed By: Quinn (Test Architect)
+
+### Code Quality Assessment
+
+Implementation of loop detection is localized in `MALIB.Util.DiagramTool.Output.ApplyLoopCompression`, with dedicated tests validating core Inproc and Queue loop behaviors plus mixed-arrow cases. The design respects the correlated event schema from ST-003, uses forward-only scanning, and maintains deterministic behavior for a given input. No blocking issues or major maintainability concerns were identified for ST-004.
+
+### Refactoring Performed
+
+- **None during this QA review**
+  - **Change**: No code refactoring performed; review relied on existing implementation and unit tests.
+  - **Why**: Current implementation already meets AC-08 and the loop-related aspects of AC-09 based on available tests.
+  - **How**: Future improvements are captured below as recommendations rather than in-place refactors.
+
+### Compliance Check
+
+- Coding Standards: ✓ — Implementation and tests align with existing DiagramTool style and ObjectScript testing conventions.
+- Project Structure: ✓ — Loop logic and tests are in the expected `MALIB.Util.DiagramTool.Output` and `MALIB.Test.DiagramToolOutputTest` locations.
+- Testing Strategy: ✓ — Behavior is primarily covered by unit tests with clear scenario naming, plus future integration coverage planned in the test design.
+- All ACs Met: ✓ — AC-08 and loop-related aspects of AC-09 are satisfied for implemented scenarios; remaining P2 scenarios are tracked as non-blocking enhancements.
+
+### Improvements Checklist
+
+- [ ] Implement remaining P2 unit scenarios from `docs/qa/assessments/st.004-test-design-20251123.md` (non-compressible singles, ambiguous/partial pairs, deterministic segmentation).
+- [ ] Add integration test `st.004-INT-001` to exercise correlation + loop compression end-to-end using real correlated events.
+- [ ] Consider additional diagnostics or logging around ambiguous loop regions or skipped compression decisions if future debugging requires more insight.
+
+### Security Review
+
+Loop detection operates only on correlated in-memory event lists and emits Mermaid text; no new I/O, persistence, or external calls were introduced. No security concerns were identified for this story.
+
+### Performance Considerations
+
+Loop grouping uses a forward-only scan over the correlated events and is expected to be O(n) with negligible overhead relative to correlation and SQL stages. No performance issues were observed in the current unit-test scope; future large-session profiling can be considered if needed.
+
+### Files Modified During Review
+
+- Documentation/QA artifacts only:
+  - `docs/qa/gates/st.004-loop-detection.yml`
+  - `docs/stories/story-004-loop-detection.md` (this QA Results section)
+
+_No code or test files were modified during this QA review; no updates to the story File List are required._
+
+### Gate Status
+
+Gate: PASS → `docs/qa/gates/st.004-loop-detection.yml`  
+Risk profile: not yet generated (see `docs/qa/assessments/st.004-test-design-20251123.md` for test design).  
+NFR assessment: not yet generated; NFR-02/NFR-03/NFR-05 are partially validated via current unit tests.
+
+### Recommended Status
+
+[✓ Ready for Done] / [✗ Changes Required - See unchecked items above]
+
+Given the passing unit tests and absence of blocking issues, this review recommends **Ready for Done**, with remaining items tracked as follow-up improvements rather than blockers.

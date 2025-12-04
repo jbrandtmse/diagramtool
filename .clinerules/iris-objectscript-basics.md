@@ -3,8 +3,9 @@
 ## Basics  
    - "namespace" = IRIS namespace  
    - "package" prefix = class prefix  
-   - Do not create classes or properties with '%' or '_'
+   - Do not create classes or properties with '%' or '_'  
    - Class parameter names must not contain underscore ('_') characters - use camel case (e.g., "MyParameter") or all caps without underscores (e.g., "MYPARAM" or "MYPARAMETER") instead
+   - Method names must not contain underscore ('_') characters; use camel case (e.g., `TestCoreScenario45UNIT001`) and keep any formal test IDs in comments or assertion messages instead of the method name
    - Compile classes using the compile_objectscript_class or compile_objectscript_package MCP tool.
 
 ## Abstract Methods in ObjectScript
@@ -96,6 +97,8 @@
 ## Comments  
    - Semicolon for single-line comments  
    - Class/Method banners must have HTML & DocBook markup
+   - Use `///` for method-level doc comments in class definitions; avoid `//`, which is not treated as a comment in ObjectScript classes and can break parsing
+   - Reserve `/* ... */` block comments for safe top-of-file banners; avoid placing them immediately around method signatures, as mismatched or misplaced blocks can trigger ERROR #5559 parse failures
 
 ## Indentation and Formatting
    - Always indent ObjectScript commands within methods by at least 1 space or tab to avoid compile errors.
@@ -176,3 +179,8 @@
 - Always use %Library.Embedding datatype for IRIS vector operations, not %Vector datatype
 - Test vector operations with simple queries first, then complex semantic searches
 - Realistic similarity scores for vector search: High relevance (0.6-0.8), Medium (0.3-0.6), Low (0.2-0.4)
+
+## Tool Usage Constraints in this Repo
+- Use `task_progress` only with the **built-in Cline tools that explicitly declare it** in their schemas (e.g., `read_file`, `write_to_file`, `replace_in_file`, `list_files`, `search_files`, `web_fetch`, `act_mode_respond`, `plan_mode_respond`, `attempt_completion`, `new_task`, `ask_followup_question`).
+- **Do NOT** pass `task_progress` as an argument to **MCP-provided tools** (for example, `iris-execute-mcp` tools like `execute_classmethod`, `execute_unit_tests`, `compile_objectscript_class`, or Perplexity MCP tools), because their schemas do not accept it and the MCP layer will reject the call with validation errors.
+- When in doubt, treat MCP tools as having **fixed, strict signatures**: only send parameters they explicitly document; never “inherit” Cline-only parameters like `task_progress` into those calls.

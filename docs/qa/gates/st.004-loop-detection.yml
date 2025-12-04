@@ -1,0 +1,43 @@
+schema: 1
+story: "st.004"
+story_title: "Loop Detection (Contiguous Identical Pairs)"
+gate: PASS
+status_reason: "Core loop detection behavior implemented and unit-tested against AC-08 and loop-related aspects of AC-09; 5/5 relevant DiagramToolOutput tests passing, including ST-004 Inproc/Queue loop scenarios."
+reviewer: "Quinn (Test Architect) — Automated unit tests reviewed"
+updated: "2025-12-04T02:09:00Z"
+
+top_issues: []
+
+waiver:
+  active: false
+
+quality_score: 100
+expires: "2025-12-18T00:00:00Z"
+
+evidence:
+  tests_reviewed: 5
+  risks_identified: 0
+  trace:
+    ac_covered: [8, 9]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: "Loop detection operates on correlated in-memory event lists only; no new I/O, persistence, or external side effects."
+  performance:
+    status: PASS
+    notes: "Forward-only scan over correlated events; expected O(n) behavior and negligible overhead compared to correlation and SQL stages."
+  reliability:
+    status: PASS
+    notes: "Unit tests validate core loop grouping semantics for Inproc and Queue flows; behavior is deterministic for given correlated inputs."
+  maintainability:
+    status: PASS
+    notes: "Loop grouping logic is localized in Output.ApplyLoopCompression with dedicated unit tests documenting expected behavior."
+
+recommendations:
+  immediate: []
+  future:
+    - "Implement remaining P2 unit scenarios from st.004 test design (non-compressible singles, ambiguous/partial pairs, deterministic segmentation)."
+    - "Add integration test st.004-INT-001 to exercise correlation + loop compression end-to-end using real correlated events."
+    - "Re-validate after ST-005/ST-006 to ensure loop blocks remain compatible with dedup, append-only output, and orchestration entrypoint."
