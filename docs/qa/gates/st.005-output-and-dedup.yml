@@ -1,0 +1,52 @@
+schema: 1
+story: "st.005"
+story_title: "Output (Append-only, Divider), Dedup (Default ON), Warnings, Label Toggle"
+gate: PASS
+status_reason: "All ST-005 tests in MALIB.Test.DiagramToolOutputTest passed (13/13) and implementation aligns with story acceptance criteria; remaining work is non-blocking hardening (stronger AC-11 assertions, orchestration tests, and CI wiring)."
+reviewer: "Quinn (Test Architect) — Tests executed via IRIS %UnitTest"
+updated: "2025-12-08T02:41:00Z"
+
+top_issues:
+  - description: "Strengthen AppendDiagramsToFile-focused tests to re-open the output file and assert INITIAL-LINE preservation, correct placement of \"%% ---\" dividers, and blank-line separation for AC-11."
+    severity: "low"
+    suggested_owner: "dev"
+  - description: "Add an orchestration-level ST-006 test for GenerateDiagrams with real file output to assert combined dedup/divider/append-only behavior."
+    severity: "low"
+    suggested_owner: "dev"
+  - description: "Ensure IRIS %UnitTest runner integration remains available in CI/tooling so DiagramTool tests are exercised regularly."
+    severity: "low"
+    suggested_owner: "sm"
+
+waiver:
+  active: false
+
+quality_score: 100
+expires: "2025-12-22T00:00:00Z"
+
+evidence:
+  tests_reviewed: 13
+  risks_identified: 0
+  trace:
+    ac_covered: [4, 9, 10, 11, 13]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: "ST-005 operates on correlated in-memory events and writes to an explicitly provided file path; no new auth, network I/O, or persistence surfaces are introduced."
+  performance:
+    status: PASS
+    notes: "Deduplication and loop-aware rendering are linear in the number of diagrams/events and reuse existing ST-004 logic; file I/O is append-only streaming."
+  reliability:
+    status: PASS
+    notes: "All ST-005 tests in MALIB.Test.DiagramToolOutputTest passed (13/13); remaining items are non-blocking hardening (deeper AC-11 file-content assertions, ST-006 orchestration tests, and CI wiring)."
+  maintainability:
+    status: PASS
+    notes: "Responsibilities for labeling, warnings, dedup, and file output are cleanly separated (`Output`, `DiagramTool.GenerateDiagrams`, `DiagramDedupKey`), with focused unit tests and clear story-level documentation."
+
+recommendations:
+  immediate: []
+  future:
+    - "Strengthen AppendDiagramsToFile-focused tests to re-open the output file and assert preservation of INITIAL-LINE, correct placement of \"%% ---\" dividers, and blank-line separation for AC-11."
+    - "Add an orchestration-level test under ST-006 that exercises GenerateDiagrams with multi-session inputs and a real file path, asserting combined behavior for dedup, dividers, and append-only semantics."
+    - "Keep CI and IRIS %UnitTest runner integration in place so DiagramTool tests (including ST-005) are executed regularly."

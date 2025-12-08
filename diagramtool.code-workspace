@@ -6,6 +6,14 @@
 		{
 			"name": "localhost-healthshare:HSCUSTOM",
 			"uri": "isfs://localhost-healthshare:hscustom/?system=1"
+		},
+		{
+			"name": "qa-cen-hsgw-01:CQGATEWAY02",
+			"uri": "isfs://qa-cen-hsgw-01:cqgateway02/"
+		},
+		{
+			"name": "qa-cen-hsgw-01:CQGATEWAY01",
+			"uri": "isfs://qa-cen-hsgw-01:cqgateway01/"
 		}
 	],
 	"settings": {
@@ -29,6 +37,15 @@
 				},
 				"username": "_SYSTEM",
 				"password": "_SYSTEM"
+			},
+			"qa-cen-hsgw-01": {
+				"webServer": {
+					"scheme": "http",
+					"host": "10.0.64.22",
+					"port": 80
+				},
+				"username": "_SYSTEM",
+				"password": "Kh,N_u8VBF<&4>Tr"
 			}
 		},
 		"files.exclude": {
