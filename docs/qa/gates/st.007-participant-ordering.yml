@@ -1,0 +1,48 @@
+schema: 1
+story: "st.007"
+story_title: "Participant Ordering by First Appearance"
+gate: PASS
+status_reason: "All ST-007 participant-ordering tests in MALIB.Test.DiagramToolOutputTest and MALIB.Test.DiagramToolTest passed (4/4 ST-007-specific tests; 24/24 total across both classes) and implementation aligns with PRD 50 Participants rules and this story's AC-07.1–AC-07.4."
+reviewer: "Quinn (Test Architect) — Tests executed via IRIS %UnitTest"
+updated: "2025-12-08T03:31:00Z"
+
+top_issues:
+  - description: "Add additional ST-007 scenarios that combine participant ordering with loop-compressed events to further exercise interaction with ST-004."
+    severity: "low"
+    suggested_owner: "dev"
+  - description: "Add a small multi-session fixture-based test using Ens.MessageHeader rows that mirrors a real production trace, to validate participant ordering in a more realistic end-to-end scenario."
+    severity: "low"
+    suggested_owner: "dev"
+
+waiver:
+  active: false
+
+quality_score: 100
+expires: "2025-12-22T00:00:00Z"
+
+evidence:
+  tests_reviewed: 4
+  risks_identified: 0
+  trace:
+    ac_covered: [9]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: "ST-007 operates purely on in-memory correlated events and participant names derived from Ens.MessageHeader; no new auth, network I/O, or persistence surfaces are introduced."
+  performance:
+    status: PASS
+    notes: "Participant ordering is computed with a single forward scan over the final event/loop sequence using a simple seen-set and list, remaining O(n) in the number of events."
+  reliability:
+    status: PASS
+    notes: "All ST-007 tests in MALIB.Test.DiagramToolOutputTest (3/3) and MALIB.Test.DiagramToolTest (1/1) passed in IRIS via %UnitTest; ordering is deterministic for a fixed input event stream."
+  maintainability:
+    status: PASS
+    notes: "Participant ordering logic is localized to MALIB.Util.DiagramTool.Output (RecordParticipant + first-appearance scan) with focused ST-007 tests at both Output and orchestration levels."
+
+recommendations:
+  immediate: []
+  future:
+    - "Add additional ST-007 tests that combine participant ordering with loop-compressed events to exercise interaction with ST-004."
+    - "Add a small multi-session, Ens.MessageHeader-backed fixture to validate participant ordering over a realistic trace."

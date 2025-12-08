@@ -371,4 +371,97 @@ Method TestST006HeaderDebug() As %Status
     Quit $$$OK
 }
 
+/// ST-007: Orchestration-level participant ordering via GenerateDiagrams
+Method TestST007ParticipantOrderingViaGenerateDiagrams() As %Status
+{
+    Set sid = 9100008
+    Do ..CleanupSession(sid)
+
+    ; Insert three request/response pairs introducing participants in order A, B, C
+    ; Pair 1: A -> B, B -> A
+    Set idReq1 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:00",
+        "Unit.Test.ST007.OrchReq1",
+        "Inproc",
+        "A",
+        "B",
+        "",
+        0)
+
+    Set idResp1 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:01",
+        "Unit.Test.ST007.OrchResp1",
+        "Inproc",
+        "B",
+        "A",
+        "",
+        idReq1)
+
+    ; Pair 2: B -> C, C -> B
+    Set idReq2 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:02",
+        "Unit.Test.ST007.OrchReq2",
+        "Inproc",
+        "B",
+        "C",
+        "",
+        0)
+
+    Set idResp2 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:03",
+        "Unit.Test.ST007.OrchResp2",
+        "Inproc",
+        "C",
+        "B",
+        "",
+        idReq2)
+
+    ; Pair 3: C -> A, A -> C
+    Set idReq3 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:04",
+        "Unit.Test.ST007.OrchReq3",
+        "Inproc",
+        "C",
+        "A",
+        "",
+        0)
+
+    Set idResp3 = ..InsertConfiguredHeader(sid,
+        "2024-01-02 10:00:05",
+        "Unit.Test.ST007.OrchResp3",
+        "Inproc",
+        "A",
+        "C",
+        "",
+        idReq3)
+
+    Set selector = sid
+    Set tText = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool).GenerateDiagrams(selector, "", "full", 1, .tText)
+    Do $$$AssertStatusOK(tSC, "st.007-orch GenerateDiagrams returned OK for participant ordering scenario")
+
+    ; Participant declarations must follow first-appearance order: A, B, C
+    Set idxA = $Find(tText, "participant A")
+    Set idxB = $Find(tText, "participant B")
+    Set idxC = $Find(tText, "participant C")
+
+    Do $$$AssertTrue(idxA>0, "st.007-orch participant A declared")
+    Do $$$AssertTrue(idxB>0, "st.007-orch participant B declared")
+    Do $$$AssertTrue(idxC>0, "st.007-orch participant C declared")
+
+    Do $$$AssertTrue(idxA<idxB, "st.007-orch participant A appears before B")
+    Do $$$AssertTrue(idxB<idxC, "st.007-orch participant B appears before C")
+
+    ; Ensure no duplicate declarations
+    Set countA = $Length(tText, "participant A")-1
+    Set countB = $Length(tText, "participant B")-1
+    Set countC = $Length(tText, "participant C")-1
+    Do $$$AssertEquals(countA, 1, "st.007-orch participant A declared once")
+    Do $$$AssertEquals(countB, 1, "st.007-orch participant B declared once")
+    Do $$$AssertEquals(countC, 1, "st.007-orch participant C declared once")
+
+    Do ..CleanupSession(sid)
+    Quit $$$OK
+}
+
 }

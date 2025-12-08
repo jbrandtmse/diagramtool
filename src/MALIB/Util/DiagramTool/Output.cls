@@ -58,24 +58,42 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
     ; Header and session comment
     Set lines = "sequenceDiagram"_$Char(13,10)_"%% Session "_pSessionId
 
-    ; Collect participants solely from loaded rows (independent of loop compression)
-    Kill tPart
-    Set lenRows = pRows.%Size()
-    For i=0:1:lenRows-1 {
-        Set row = pRows.%Get(i)
-        Continue:'$IsObject(row)
-        Set src = row.%Get("SourceConfigName")
-        Set dst = row.%Get("TargetConfigName")
-        If src'="" Set tPart(src)=""
-        If dst'="" Set tPart(dst)=""
+    ; ST-007: Collect participants based on order-of-first-appearance
+    ; in the final correlated/loop-compressed event sequence
+    Kill tPartSeen
+    Set tPartList = ##class(%DynamicArray).%New()
+
+    If $IsObject(tLooped) {
+        Set lenLoop = tLooped.%Size()
+        For i=0:1:lenLoop-1 {
+            Set ev = tLooped.%Get(i)
+            Continue:'$IsObject(ev)
+
+            Set evType = $ZCONVERT(ev.EventType,"U")
+
+            ; Loop events carry request/response endpoints separately
+            If evType="LOOP" {
+                Do ..RecordParticipant(.tPartSeen, .tPartList, ev.ReqSrc)
+                Do ..RecordParticipant(.tPartSeen, .tPartList, ev.ReqDst)
+                Do ..RecordParticipant(.tPartSeen, .tPartList, ev.RespSrc)
+                Do ..RecordParticipant(.tPartSeen, .tPartList, ev.RespDst)
+                Continue
+            }
+
+            ; Non-loop events use Src/Dst endpoints
+            Do ..RecordParticipant(.tPartSeen, .tPartList, ev.Src)
+            Do ..RecordParticipant(.tPartSeen, .tPartList, ev.Dst)
+        }
     }
 
-    ; Emit participants
-    Set name=""
-    For {
-        Set name = $Order(tPart(name))
-        Quit:name=""
-        Set lines = lines_$Char(13,10)_"participant "_name
+    ; Emit participants in order-of-first-appearance (per session)
+    If $IsObject(tPartList) {
+        Set lenParts = tPartList.%Size()
+        For i=0:1:lenParts-1 {
+            Set name = tPartList.%Get(i)
+            Continue:name=""
+            Set lines = lines_$Char(13,10)_"participant "_name
+        }
     }
 
     ; Emit events and loop blocks as Mermaid arrows
@@ -324,6 +342,32 @@ ClassMethod PairSignature(pReq As MALIB.Util.DiagramTool.Event, pResp As MALIB.U
     ; Signature includes arrow semantics to distinguish Inproc vs Queue
     Set sig = reqSrc_"|"_reqDst_"|"_reqLbl_"|"_reqArrow_"||"_respSrc_"|"_respDst_"|"_respLbl_"|"_respArrow
     Quit sig
+}
+
+/// ST-007 helper — track participants by order-of-first-appearance
+ClassMethod RecordParticipant(ByRef pSeen, ByRef pList As %DynamicArray, pName As %String) As %Status
+{
+    Set tSC = $$$OK
+
+    ; Ignore empty participant names
+    If pName="" {
+        Quit tSC
+    }
+
+    ; If already seen, do nothing
+    If $Data(pSeen(pName)) {
+        Quit tSC
+    }
+
+    Set pSeen(pName) = 1
+
+    ; Ensure list exists before pushing
+    If '$IsObject(pList) {
+        Set pList = ##class(%DynamicArray).%New()
+    }
+
+    Do pList.%Push(pName)
+    Quit tSC
 }
 
 /// ST-006 helper — Label selection based on label mode (for dynamic callers)

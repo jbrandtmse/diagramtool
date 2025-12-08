@@ -434,4 +434,130 @@ Method TestST005DeterministicOutputWithWarningsAndDedup() As %Status
     Quit $$$OK
 }
 
+/// ST-007 UNIT-001: Single-session participant declarations follow first-appearance order
+Method TestST007SingleSessionParticipantOrderByFirstAppearance() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9107001
+
+    ; Participants appear in event stream in order: A, B, C
+    ; Pair 1: A -> B, B -> A
+    Do ..PushRow(rows, ..NewRow(7001, "Inproc", "Request", "A", "B", "", "", "Unit.Test.ST007.Pair1Req", sess))
+    Do ..PushRow(rows, ..NewRow(7002, "Inproc", "Response", "B", "A", "", 7001, "Unit.Test.ST007.Pair1Resp", sess))
+
+    ; Pair 2: B -> C, C -> B
+    Do ..PushRow(rows, ..NewRow(7003, "Inproc", "Request", "B", "C", "", "", "Unit.Test.ST007.Pair2Req", sess))
+    Do ..PushRow(rows, ..NewRow(7004, "Inproc", "Response", "C", "B", "", 7003, "Unit.Test.ST007.Pair2Resp", sess))
+
+    ; Pair 3: C -> A, A -> C
+    Do ..PushRow(rows, ..NewRow(7005, "Inproc", "Request", "C", "A", "", "", "Unit.Test.ST007.Pair3Req", sess))
+    Do ..PushRow(rows, ..NewRow(7006, "Inproc", "Response", "A", "C", "", 7005, "Unit.Test.ST007.Pair3Resp", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.007-UNIT-001 BuildDiagramForSession OK for single-session participant ordering")
+
+    ; Participants must be declared once each, in first-appearance order: A, then B, then C
+    Set idxA = $Find(diag, "participant A")
+    Set idxB = $Find(diag, "participant B")
+    Set idxC = $Find(diag, "participant C")
+
+    Do $$$AssertTrue(idxA>0, "st.007-UNIT-001 participant A declared")
+    Do $$$AssertTrue(idxB>0, "st.007-UNIT-001 participant B declared")
+    Do $$$AssertTrue(idxC>0, "st.007-UNIT-001 participant C declared")
+
+    Do $$$AssertTrue(idxA<idxB, "st.007-UNIT-001 participant A appears before B")
+    Do $$$AssertTrue(idxB<idxC, "st.007-UNIT-001 participant B appears before C")
+
+    ; Ensure no duplicate declarations
+    Set countA = $Length(diag, "participant A")-1
+    Set countB = $Length(diag, "participant B")-1
+    Set countC = $Length(diag, "participant C")-1
+    Do $$$AssertEquals(countA, 1, "st.007-UNIT-001 participant A declared once")
+    Do $$$AssertEquals(countB, 1, "st.007-UNIT-001 participant B declared once")
+    Do $$$AssertEquals(countC, 1, "st.007-UNIT-001 participant C declared once")
+
+    Quit $$$OK
+}
+
+/// ST-007 UNIT-002: Multi-session independence of participant ordering
+Method TestST007MultiSessionIndependentParticipantOrdering() As %Status
+{
+    ; Session S1 first-use order: [A, B]
+    Set rows1 = ..NewRowsArray()
+    Set sess1 = 9107002
+    Do ..PushRow(rows1, ..NewRow(7101, "Inproc", "Request", "A", "B", "", "", "Unit.Test.ST007.S1Req", sess1))
+    Do ..PushRow(rows1, ..NewRow(7102, "Inproc", "Response", "B", "A", "", 7101, "Unit.Test.ST007.S1Resp", sess1))
+
+    ; Session S2 first-use order: [B, C, A]
+    Set rows2 = ..NewRowsArray()
+    Set sess2 = 9107003
+    Do ..PushRow(rows2, ..NewRow(7201, "Inproc", "Request", "B", "C", "", "", "Unit.Test.ST007.S2Req1", sess2))
+    Do ..PushRow(rows2, ..NewRow(7202, "Inproc", "Response", "C", "B", "", 7201, "Unit.Test.ST007.S2Resp1", sess2))
+    Do ..PushRow(rows2, ..NewRow(7203, "Inproc", "Request", "A", "B", "", "", "Unit.Test.ST007.S2Req2", sess2))
+    Do ..PushRow(rows2, ..NewRow(7204, "Inproc", "Response", "B", "A", "", 7203, "Unit.Test.ST007.S2Resp2", sess2))
+
+    Set diag1 = "", diag2 = ""
+    Set tSC1 = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess1, rows1, "full", .diag1)
+    Set tSC2 = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess2, rows2, "full", .diag2)
+    Do $$$AssertStatusOK(tSC1, "st.007-UNIT-002 BuildDiagramForSession OK for first session")
+    Do $$$AssertStatusOK(tSC2, "st.007-UNIT-002 BuildDiagramForSession OK for second session")
+
+    ; S1: expect participant A then B
+    Set idxA1 = $Find(diag1, "participant A")
+    Set idxB1 = $Find(diag1, "participant B")
+    Do $$$AssertTrue((idxA1>0)&(idxB1>0), "st.007-UNIT-002 S1 participants A and B declared")
+    Do $$$AssertTrue(idxA1<idxB1, "st.007-UNIT-002 S1 participant A appears before B")
+
+    ; S2: expect participant B, then C, then A
+    Set idxB2 = $Find(diag2, "participant B")
+    Set idxC2 = $Find(diag2, "participant C")
+    Set idxA2 = $Find(diag2, "participant A")
+    Do $$$AssertTrue((idxB2>0)&(idxC2>0)&(idxA2>0), "st.007-UNIT-002 S2 participants B, C, A declared")
+    Do $$$AssertTrue(idxB2<idxC2, "st.007-UNIT-002 S2 participant B appears before C")
+    Do $$$AssertTrue(idxC2<idxA2, "st.007-UNIT-002 S2 participant C appears before A")
+
+    Quit $$$OK
+}
+
+/// ST-007 UNIT-003: Participant ordering unaffected by labelMode (full vs short)
+Method TestST007ParticipantOrderingIndependentOfLabelMode() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9107004
+
+    ; Three participants with distinct first-use ordering
+    Do ..PushRow(rows, ..NewRow(7301, "Inproc", "Request", "X1", "Y1", "", "", "My.App.Full.Label1", sess))
+    Do ..PushRow(rows, ..NewRow(7302, "Inproc", "Response", "Y1", "X1", "", 7301, "My.App.Full.Label2", sess))
+    Do ..PushRow(rows, ..NewRow(7303, "Inproc", "Request", "Z1", "X1", "", "", "My.App.Full.Label3", sess))
+    Do ..PushRow(rows, ..NewRow(7304, "Inproc", "Response", "X1", "Z1", "", 7303, "My.App.Full.Label4", sess))
+
+    Set diagFull = "", diagShort = ""
+    Set tSC1 = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diagFull)
+    Set tSC2 = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "short", .diagShort)
+    Do $$$AssertStatusOK(tSC1, "st.007-UNIT-003 BuildDiagramForSession OK for full label mode")
+    Do $$$AssertStatusOK(tSC2, "st.007-UNIT-003 BuildDiagramForSession OK for short label mode")
+
+    ; Extract participant declaration locations from both diagrams
+    Set idxX1Full = $Find(diagFull, "participant X1")
+    Set idxY1Full = $Find(diagFull, "participant Y1")
+    Set idxZ1Full = $Find(diagFull, "participant Z1")
+
+    Set idxX1Short = $Find(diagShort, "participant X1")
+    Set idxY1Short = $Find(diagShort, "participant Y1")
+    Set idxZ1Short = $Find(diagShort, "participant Z1")
+
+    Do $$$AssertTrue((idxX1Full>0)&(idxY1Full>0)&(idxZ1Full>0), "st.007-UNIT-003 full diagram participants X1,Y1,Z1 declared")
+    Do $$$AssertTrue((idxX1Short>0)&(idxY1Short>0)&(idxZ1Short>0), "st.007-UNIT-003 short diagram participants X1,Y1,Z1 declared")
+
+    ; Relative ordering must match between modes
+    Do $$$AssertTrue(idxX1Full<idxY1Full, "st.007-UNIT-003 full mode: X1 before Y1")
+    Do $$$AssertTrue(idxY1Full<idxZ1Full, "st.007-UNIT-003 full mode: Y1 before Z1")
+
+    Do $$$AssertTrue(idxX1Short<idxY1Short, "st.007-UNIT-003 short mode: X1 before Y1")
+    Do $$$AssertTrue(idxY1Short<idxZ1Short, "st.007-UNIT-003 short mode: Y1 before Z1")
+
+    Quit $$$OK
+}
+
 }
