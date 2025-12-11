@@ -119,6 +119,9 @@
 
 ## ObjectScript Compiler
    - Classes should be compiled using the compile_objectscript_class or compile_objectscript_package mcp tool.
+   - When working in this repo, always use the `iris-execute-mcp` tools for compiles and tests:
+     - Use `compile_objectscript_package` (with the correct `namespace`) to compile packages such as `MALIB.Util.DiagramTool` and `MALIB.Test`.
+     - Use `execute_unit_tests` to run `%UnitTest` suites such as `MALIB.Test.DiagramToolOutputTest` instead of invoking tests manually from a terminal.
 
 ## Ensemble Architecture Guidance
 - When creating Business Services or Business Operations in Ensemble, ensure method signatures exactly match the InterSystems-defined definitions, for example:

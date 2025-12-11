@@ -98,6 +98,35 @@ AC-13 Error Handling and Best-Effort
 - And a %Status is returned indicating success or error for programmatic use
 - And warnings are emitted as "%%" comments where feasible (no strict-mode failures)
 
+AC-14 Episode Grouping and Business-Only Signatures
+- Given a correlated event stream for a session after pair-level loop compression (ST-004)
+- When episodes are built from that event stream
+- Then events belonging to the same transactional multi-hop flow are grouped into ordered episodes
+- And each episode has a canonical signature computed only from business-relevant events (Src, Arrow, Dst, label in full mode, Invocation, EventType)
+- And trace/log events (for example `HS.Util.Trace.*`) do not affect whether two episodes are considered equal
+
+AC-15 Episode-Based Loop Compression for Repeated Flows
+- Given a session where a specific episode pattern repeats contiguously with N > 1 episodes
+- When generating the diagram
+- Then those repeated episodes are rendered as a single `loop N times <label>` block at the episode level
+- And the inner body of the loop renders one canonical episode, including any trace/log events that occurred within each episode
+- And episodes with different business signatures are not compressed together into the same loop
+
+AC-16 Interaction of Episode Loops with Pair-Level Loops, Dedup, and LabelMode
+- Given a session that already benefits from ST-004 pair-level loops, ST-005/ST-006 output/dedup behavior, and ST-007 participant ordering
+- When episode-based loop compression is applied
+- Then pair-level loop behavior remains correct and unchanged for eligible request/response pairs
+- And cross-session deduplication still operates on the final rendered text, treating diagrams with identical text (including any episode loops) as duplicates
+- And labelMode (full vs short) is honored consistently for all message and loop labels inside and outside episode loops
+- And participant declarations still precede all message and loop lines and are unaffected in semantics by episode-based compression
+
+AC-17 Determinism and Stability for Episode-Based Loops
+- Given a fixed correlated and loop-compressed event stream for a session and a fixed configuration
+- When diagrams are generated multiple times in the same environment
+- Then episode boundaries and episode signatures are stable across runs
+- And episode-based `loop N times` blocks appear in the same positions with the same counts across runs
+- And the presence or absence of trace/log events alone does not cause two semantically identical business episodes to be treated as different for compression purposes
+
 Out-of-Scope Confirmations (MVP)
 - SuperSession composition
 - CSV or non-SQL data modes

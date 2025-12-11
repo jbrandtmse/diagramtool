@@ -20,7 +20,7 @@
 		"objectscript.conn": {
 			"server": "localhost",
 			"ns": "HSCUSTOM",
-			"active": true
+			"active": false
 		},
 		"objectscript.serverSourceControl.respectEditableStatus": true,
 		"objectscript.openClassContracted": true,

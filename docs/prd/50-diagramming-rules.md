@@ -51,55 +51,103 @@ Reference: https://mermaid.js.org/syntax/sequenceDiagram.html
   - Inproc: Dst → Src (reverse of request direction), arrow ->>
   - Queue: Dst → Src (reverse), arrow always -->> for queued pairs
 
-7) Loop Compression
+7) Pair-Level Loop Compression (ST-004)
 - Definition: Contiguous pairs of request/response with identical signature
-  Signature includes Req(Src, Dst, Label) and Resp(Src, Dst, Label)
+  - Signature includes Req(Src, Dst, Label, Arrow) and Resp(Src, Dst, Label, Arrow)
 - When repeated N>1 times, compress:
+  ```mermaid
   loop N times <Label>
     <Req line>
     <Resp line>
   end
-- Do not compress if pairs are interrupted by other messages
+  ```
+- Do not compress if pairs are interrupted by other messages with different signatures
+- Arrow semantics (Inproc vs Queue) are preserved from correlation
 
-8) Comments, Warnings, and Session Header
+8) Episode-Based Loop Compression (ST-008)
+- Definition: An **episode** is a higher-level transactional call flow built from the correlated event stream **after** ST-004:
+  - Typically initiated by a root business Request (e.g., XDS/XCPD queries, AddUpdateDocument flows).
+  - May span multiple hops (A → B → C → … → B → A) before resolving.
+  - Internally represented as an `Episode` object with an ordered collection of events.
+- Episode signatures:
+  - For each episode, a canonical **episode signature** is computed from **business-relevant events only**:
+    - Each business line contributes:
+      - `Src | Arrow | Dst | NormalizedLabel(full) | Invocation | EventType`.
+    - **Trace/log events** (e.g., `HS.Util.Trace.*`) are:
+      - Included inside the episode for context, but
+      - **Ignored** when computing the episode signature.
+  - Two episodes are considered equal if and only if:
+    - They have identical sequences of business event signature fragments.
+    - Differences in trace/log events do **not** change equality.
+- Episode-based loops:
+  - After episodes are identified and signatures computed, the system:
+    - Scans the ordered sequence of episodes.
+    - Detects **contiguous runs** of episodes with identical signatures.
+    - Compresses such runs into:
+      ```mermaid
+      loop N times <label>
+        <canonical episode body (one episode)>
+      end
+      ```
+      where:
+      - `N` is the count of repeated episodes.
+      - The inner body is a canonical rendering of **one** episode.
+      - The canonical body includes all events for that episode, including any trace/log events, in their original relative positions.
+  - Loop labels:
+    - Use a representative business label from the episode (typically the primary request’s MessageBodyClassName).
+    - Respect existing `labelMode` rules (`full` vs `short`) when rendered.
+- Determinism:
+  - Given a fixed correlated event stream (after ST-004) and configuration:
+    - Episode boundaries and signatures are deterministic.
+    - Episode-based `loop N times` blocks appear in the **same places** with the **same counts** across runs.
+    - Trace/log events do not cause two semantically identical business episodes to be treated differently.
+
+9) Comments, Warnings, and Session Header
 - Optional header to annotate session:
   %% Session <SessionId>
 - Non-fatal warnings (e.g., unknown Invocation, conflicting CorrespondingMessageId, unpaired queued response) should be emitted as "%%" comments near the relevant lines where feasible
 - When writing multiple diagrams to a file, insert a divider:
   %% ---
 
-9) Deduplication (Multi-Session Runs)
+10) Deduplication (Multi-Session Runs)
 - When multiple sessions are requested, diagrams may be identical
-- Compute stable hash of the full diagram text
+- Compute stable hash of the full diagram text (using a normalized key that hides the specific SessionId)
 - Deduplication is ON by default; only output unique diagrams
 - Silent deduplication: do not emit a summary of removed SessionIds
 
-10) Minimal Diagram on Empty Data
+11) Minimal Diagram on Empty Data
 - If a session yields no rows after filtering, emit:
+  ```mermaid
   sequenceDiagram
   %% Session <SessionId>
   %% No data available (filtered or empty)
+  ```
 - Rationale: valid Mermaid output is always produced
 
-11) Examples
+12) Examples
 
 Example A — Synchronous (Inproc) with full class labels
+```mermaid
 sequenceDiagram
 %% Session 1584253
 participant MA_CEN_IHE_XDSb_Query_Process as "MA.CEN.IHE.XDSb.Query.Process"
 participant MA_CEN_Registry_Patient_Manager_IG as "MA.CEN.Registry.Patient.Manager.IG"
 MA_CEN_IHE_XDSb_Query_Process ->> MA_CEN_Registry_Patient_Manager_IG: HS.Message.PatientSearchRequest
 MA_CEN_Registry_Patient_Manager_IG ->> MA_CEN_IHE_XDSb_Query_Process: MA.Message.PatientSearchResponse
+```
 
 Example B — Queued pair (both legs async -->>) correlated via CorrMsgId
+```mermaid
 sequenceDiagram
 %% Session 1593849
 participant MA_CEN_Registry_Patient_Manager_IG as "MA.CEN.Registry.Patient.Manager.IG"
 participant MA_CEN_EMPI_ManagerV2 as "MA.CEN.EMPI.ManagerV2"
 MA_CEN_Registry_Patient_Manager_IG -->> MA_CEN_EMPI_ManagerV2: HS.Message.AddUpdateHubRequest
 MA_CEN_EMPI_ManagerV2 -->> MA_CEN_Registry_Patient_Manager_IG: HS.Message.AddUpdateHubResponse
+```
 
-Example C — Loop Compression (Contiguous Identical Pairs)
+Example C — Pair-Level Loop Compression (Contiguous Identical Pairs)
+```mermaid
 sequenceDiagram
 %% Session 1584253
 participant A as "MA.QHIN.IHE.XCPD.InitiatingGateway.Process"
@@ -108,27 +156,21 @@ loop 3 times HS.Message.PatientSearchRequest
 A -->> B: HS.Message.PatientSearchRequest
 B -->> A: HS.Message.PatientSearchResponse
 end
+```
 
-Example D — Warning comment (unknown Invocation defaulted to sync)
-sequenceDiagram
-%% Session 123
-participant X as "Service.X"
-participant Y as "Process.Y"
-%% Warning: Unknown Invocation 'ASYNCFAST' at ID=999; defaulting to sync (->>)
-X ->> Y: HS.Message.SomeRequest
-
-12) Edge Handling
+13) Edge Handling
 - Non-ASCII in labels: allowed; only identifiers are sanitized
 - Missing Source/Target:
   - If either side is blank, skip message or emit a "%%" note, preferring best-effort output over failure
 - Ties on TimeCreated:
   - Break ties by ID to maintain determinism
 
-13) Formatting Consistency and File Appends
+14) Formatting Consistency and File Appends
 - Maintain a blank line between diagrams in the combined text result
 - On file output, use append-only and add "%% ---" divider between diagrams
 - Keep comments concise; avoid flooding the diagram with metadata
 
 Traceability
-- FR-04 (Actors), FR-05 (Labels), FR-06 (Arrows), FR-08 (Loops), FR-09 (Per-session), FR-10 (Dedup), FR-11 (Append-only)
+- FR-04 (Actors), FR-05 (Labels), FR-06 (Arrows), FR-08 (Pair-level loops), FR-09 (Per-session), FR-10 (Dedup), FR-11 (Append-only)
+- Episode-based loop compression (ST-008) refines FR-09/FR-10 loop semantics at the **episode** level while preserving existing ST-004 behavior
 - Aligns with NFR-02 (Determinism) and NFR-03 (Resilience)

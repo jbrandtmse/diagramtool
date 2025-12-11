@@ -560,4 +560,144 @@ Method TestST007ParticipantOrderingIndependentOfLabelMode() As %Status
     Quit $$$OK
 }
 
+/// ST-008 UNIT-001: Single multi-hop flow forms one episode (no episode loop)
+Method TestST008EpisodeGroupingSingleMultiHop() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108001
+
+    ; Episode: A -> B -> C -> B -> A (multi-hop)
+    Do ..PushRow(rows, ..NewRow(8001, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.EpisodeReq",   sess))
+    Do ..PushRow(rows, ..NewRow(8002, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.InnerReq",    sess))
+    Do ..PushRow(rows, ..NewRow(8003, "Inproc", "Response", "C", "B", "", 8002, "Unit.Test.ST008.InnerResp",  sess))
+    Do ..PushRow(rows, ..NewRow(8004, "Inproc", "Response", "B", "A", "", 8001, "Unit.Test.ST008.EpisodeResp", sess))
+
+    ; Build episodes via Output helpers
+    Set evDyn = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Correlation).CorrelateEvents(rows, .evDyn)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-001 CorrelateEvents OK")
+
+    Set evTyped = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).ConvertDynamicToEvents(evDyn, .evTyped)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-001 ConvertDynamicToEvents OK")
+
+    Set tLooped = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).ApplyLoopCompression(evTyped, .tLooped)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-001 ApplyLoopCompression OK")
+
+    Set episodes = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildEpisodes(tLooped, .episodes)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-001 BuildEpisodes OK")
+    Do $$$AssertTrue($IsObject(episodes), "st.008-UNIT-001 episodes object created")
+    Do $$$AssertEquals(episodes.%Size(), 1, "st.008-UNIT-001 exactly one episode for single multi-hop flow")
+
+    Set ep = episodes.%Get(0)
+    Do $$$AssertTrue($IsObject(ep), "st.008-UNIT-001 first episode object exists")
+    Set epEvents = ep.Events
+    Do $$$AssertTrue($IsObject(epEvents), "st.008-UNIT-001 episode has Events array")
+    Do $$$AssertEquals(epEvents.%Size(), 4, "st.008-UNIT-001 episode contains all 4 correlated events")
+
+    ; Diagram should not contain an episode-level loop (N>1) for a single episode
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-001 BuildDiagramForSession OK")
+    Do $$$AssertTrue('(diag["loop 2 times Unit.Test.ST008.EpisodeReq"), "st.008-UNIT-001 no episode-level loop for single episode")
+
+    Quit $$$OK
+}
+
+/// ST-008 UNIT-003: Episode signatures ignore trace/log events for equality
+Method TestST008EpisodeSignatureIgnoresTraceEvents() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108002
+
+    ; Episode 1: base multi-hop flow
+    Do ..PushRow(rows, ..NewRow(8101, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.TraceBaseReq",   sess))
+    Do ..PushRow(rows, ..NewRow(8102, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.TraceInnerReq", sess))
+    Do ..PushRow(rows, ..NewRow(8103, "Inproc", "Response", "C", "B", "", 8102, "Unit.Test.ST008.TraceInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(8104, "Inproc", "Response", "B", "A", "", 8101, "Unit.Test.ST008.TraceBaseResp",  sess))
+
+    ; Episode 2: same business flow plus an extra trace/log event in the middle
+    Do ..PushRow(rows, ..NewRow(8201, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.TraceBaseReq",   sess))
+    Do ..PushRow(rows, ..NewRow(8202, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.TraceInnerReq", sess))
+
+    ; Trace event between inner request and response (HS.Util.Trace.*)
+    Do ..PushRow(rows, ..NewRow(8203, "Inproc", "Request",  "TraceP", "TraceQ", "", "", "HS.Util.Trace.Request", sess))
+
+    Do ..PushRow(rows, ..NewRow(8204, "Inproc", "Response", "C", "B", "", 8202, "Unit.Test.ST008.TraceInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(8205, "Inproc", "Response", "B", "A", "", 8201, "Unit.Test.ST008.TraceBaseResp",  sess))
+
+    Set evDyn = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Correlation).CorrelateEvents(rows, .evDyn)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-003 CorrelateEvents OK")
+
+    Set evTyped = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).ConvertDynamicToEvents(evDyn, .evTyped)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-003 ConvertDynamicToEvents OK")
+
+    Set tLooped = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).ApplyLoopCompression(evTyped, .tLooped)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-003 ApplyLoopCompression OK")
+
+    Set episodes = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildEpisodes(tLooped, .episodes)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-003 BuildEpisodes OK")
+    Do $$$AssertTrue($IsObject(episodes), "st.008-UNIT-003 episodes object created")
+    Do $$$AssertEquals(episodes.%Size(), 2, "st.008-UNIT-003 two episodes built (with and without trace)")
+
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).ComputeEpisodeSignatures(episodes)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-003 ComputeEpisodeSignatures OK")
+
+    Set ep1 = episodes.%Get(0)
+    Set ep2 = episodes.%Get(1)
+    Do $$$AssertTrue($IsObject(ep1), "st.008-UNIT-003 first episode exists")
+    Do $$$AssertTrue($IsObject(ep2), "st.008-UNIT-003 second episode exists")
+
+    Set sig1 = ep1.Signature
+    Set sig2 = ep2.Signature
+    Do $$$AssertTrue(sig1'="", "st.008-UNIT-003 first episode signature not empty")
+    Do $$$AssertEquals(sig1, sig2, "st.008-UNIT-003 episode signatures equal despite extra trace/log event")
+
+    Quit $$$OK
+}
+
+/// ST-008 UNIT-004/005: Contiguous identical episodes compress; differing ones do not
+Method TestST008EpisodeLoopCompressionContiguousAndMixed() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108003
+
+    ; Episode A (business structure 1) - repeated twice contiguously
+    Do ..PushRow(rows, ..NewRow(8301, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.LoopedReqA",   sess))
+    Do ..PushRow(rows, ..NewRow(8302, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.LoopedInnerReqA", sess))
+    Do ..PushRow(rows, ..NewRow(8303, "Inproc", "Response", "C", "B", "", 8302, "Unit.Test.ST008.LoopedInnerRespA", sess))
+    Do ..PushRow(rows, ..NewRow(8304, "Inproc", "Response", "B", "A", "", 8301, "Unit.Test.ST008.LoopedRespA",  sess))
+
+    Do ..PushRow(rows, ..NewRow(8401, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.LoopedReqA",   sess))
+    Do ..PushRow(rows, ..NewRow(8402, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.LoopedInnerReqA", sess))
+    Do ..PushRow(rows, ..NewRow(8403, "Inproc", "Response", "C", "B", "", 8402, "Unit.Test.ST008.LoopedInnerRespA", sess))
+    Do ..PushRow(rows, ..NewRow(8404, "Inproc", "Response", "B", "A", "", 8401, "Unit.Test.ST008.LoopedRespA",  sess))
+
+    ; Episode B (different business structure: different label)
+    Do ..PushRow(rows, ..NewRow(8501, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.LoopedReqB",   sess))
+    Do ..PushRow(rows, ..NewRow(8502, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.LoopedInnerReqB", sess))
+    Do ..PushRow(rows, ..NewRow(8503, "Inproc", "Response", "C", "B", "", 8502, "Unit.Test.ST008.LoopedInnerRespB", sess))
+    Do ..PushRow(rows, ..NewRow(8504, "Inproc", "Response", "B", "A", "", 8501, "Unit.Test.ST008.LoopedRespB",  sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-004/005 BuildDiagramForSession OK for mixed episodes")
+
+    ; Contiguous identical episodes A should be compressed into a loop 2 times
+    Set hasLoopA = (diag["loop 2 times Unit.Test.ST008.LoopedReqA")
+    Do $$$AssertTrue(hasLoopA, "st.008-UNIT-004 contiguous identical episodes compressed into loop 2 times")
+
+    ; Episode B has different business structure and must not be merged into A's loop
+    Set hasLoopB2 = (diag["loop 2 times Unit.Test.ST008.LoopedReqB")
+    Do $$$AssertTrue('hasLoopB2, "st.008-UNIT-005 differing episodes not compressed together into single loop")
+
+    Quit $$$OK
+}
+
 }

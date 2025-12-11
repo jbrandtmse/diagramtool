@@ -2,13 +2,13 @@
 
 Status: Draft v4  
 Owner: Architecture  
-Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, docs/dev-notes-correlation.md, docs/stories/story-005-output-and-dedup.md
+Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, docs/dev-notes-correlation.md, docs/stories/story-005-output-and-dedup.md, docs/stories/story-006-orchestration-and-entrypoint.md, docs/stories/story-007-participant-ordering-by-first-appearance.md, docs/stories/story-008-episode-based-loop-compression.md
 
 ## Purpose
 
 - Document the system context and engineering standards used by the DiagramTool library.
 - Provide stable references for developers and QA (testing standards, source tree conventions, coding standards, tech stack, and story-level behaviors).
-- Clarify how ST-001..ST-006 fit together into a single, deterministic pipeline from trace data to Mermaid diagrams and append-only files.
+- Clarify how ST-001..ST-008 fit together into a single, deterministic pipeline from trace data to Mermaid diagrams and append-only files.
 
 ## System Context
 
@@ -28,7 +28,7 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 
   This wires together parsing, loading, correlation, loop detection, and output/dedup according to the PRD.
 
-### Processing Pipeline (stories ST-001..ST-006)
+### Processing Pipeline (stories ST-001..ST-008)
 
 1. **ST-001 — Session Spec Parsing**
    - Class: `MALIB.Util.DiagramTool.SessionSpec`
@@ -69,6 +69,25 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 6. **ST-006 — Orchestration & Entrypoint**
    - Class: `MALIB.Util.DiagramTool`
    - Responsibility: Orchestrate ST-001..ST-005 for one or more sessions and provide a single public API (`GenerateDiagrams`) for callers.
+
+7. **ST-007 — Participant Ordering by First Appearance**
+   - Class: `MALIB.Util.DiagramTool.Output`
+   - Responsibility: Derive the set of participants from the correlated/loop-compressed event stream and declare them in **order of first appearance** per session.
+   - Notes:
+     - Participants are derived from event endpoints (Src/Dst or loop Req*/Resp* endpoints).
+     - Order is per-session and independent across sessions.
+     - LabelMode affects only message/loop labels, not participant identifiers/labels.
+
+8. **ST-008 — Episode-Based Loop Compression**
+   - Classes:
+     - `MALIB.Util.DiagramTool.Output`
+     - `MALIB.Util.DiagramTool.Episode`
+     - `MALIB.Util.DiagramTool.EpisodeBlock`
+   - Responsibility: Build higher-level **episodes** from the ST-004 loop-compressed event stream, compute **business-only episode signatures**, and compress contiguous identical episodes into episode-level Mermaid `loop N times` blocks.
+   - Policy:
+     - Episode signatures ignore trace/log events (e.g. `HS.Util.Trace.*`), which are still rendered inside the episode.
+     - Only **contiguous** runs of identical episode signatures are compressed.
+     - Episode-based loops are additive and layered on top of ST-004 pair-level loops.
 
 ## Key Decisions (aligned with PRD v4)
 
@@ -118,6 +137,42 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
     ```
 
   - Arrow semantics (Inproc vs Queue) preserved from correlation.
+
+### Participants and Ordering (ST-007)
+
+- Source of truth:
+  - Participants are derived from the correlated/loop-compressed event stream (ST-003 + ST-004).
+  - Endpoints used:
+    - For non-loop events: `Src` and `Dst`.
+    - For pair-level loop events: `ReqSrc`, `ReqDst`, `RespSrc`, `RespDst`.
+- Ordering:
+  - Per session, participants are declared **once** in order of first appearance in the final event stream.
+  - Multi-session runs maintain independent participant ordering per session.
+- Independence from labelMode:
+  - Participant identifiers and labels are unaffected by labelMode; labelMode only influences message and loop labels.
+
+### Episode-Based Loop Compression (ST-008)
+
+- Episode model:
+  - Episodes are represented by `MALIB.Util.DiagramTool.Episode` objects containing:
+    - An ordered `%DynamicArray` of events.
+    - Business-only `Signature` and `RepLabel` fields.
+    - A `Compressible` flag indicating eligibility for episode-level loops.
+- Signature semantics:
+  - Episode signatures are computed only from **business events**:
+    - Per-event fragments: `Src | Arrow | Dst | Label(full) | Invocation | EventType`.
+    - Trace/log events (e.g. `HS.Util.Trace.*`) are excluded from the signature but kept in the episode body for rendering.
+  - Two episodes are equal when their business-event fragment sequences are identical.
+- Compression:
+  - The ordered list of episodes is scanned for **contiguous runs** of episodes with:
+    - Matching signatures.
+    - `Compressible=1`.
+  - For runs with `N > 1`, a `MALIB.Util.DiagramTool.EpisodeBlock` is created with:
+    - `Type="LOOP"`, `LoopCount=N`, and a canonical `Episode`.
+  - The canonical episode’s full body (including trace/log events) is rendered once inside a Mermaid `loop N times <label>` block.
+- Relationship to pair-level loops:
+  - Episode-based loops are applied **after** ST-004 pair-level loop compression.
+  - Pair-level loops remain intact and are rendered inside episodes as needed.
 
 ### Labels and Label Mode (ST-005)
 
@@ -216,6 +271,10 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
     - Multi-session dedup ON/OFF semantics.
     - Append-only file contract and divider insertion.
     - Short-label behavior via `pLabelMode`.
+- ST-007:
+  - `MALIB.Test.DiagramToolOutputTest` — participant ordering by first appearance (single- and multi-session) and independence from labelMode.
+- ST-008:
+  - `MALIB.Test.DiagramToolOutputTest` — episode grouping, trace-insensitive episode signatures, episode-based loop compression, and determinism of episode loops.
 
 ## Reference Documents
 
@@ -235,6 +294,10 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
   (Defines label modes, dedup defaults, warning placement, and append-only/divider contract.)
 - Story ST-006: `docs/stories/story-006-orchestration-and-entrypoint.md`  
   (Defines `GenerateDiagrams` as the public API and wiring across all stories.)
+- Story ST-007: `docs/stories/story-007-participant-ordering-by-first-appearance.md`  
+  (Defines participant ordering semantics and independence across sessions and label modes.)
+- Story ST-008: `docs/stories/story-008-episode-based-loop-compression.md`  
+  (Defines episode grouping, business-only episode signatures, and episode-based loop compression layered on top of ST-004.)
 
 ## Change Log
 
