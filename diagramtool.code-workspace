@@ -37,15 +37,6 @@
 				},
 				"username": "_SYSTEM",
 				"password": "_SYSTEM"
-			},
-			"qa-cen-hsgw-01": {
-				"webServer": {
-					"scheme": "http",
-					"host": "10.0.64.22",
-					"port": 80
-				},
-				"username": "_SYSTEM",
-				"password": "Kh,N_u8VBF<&4>Tr"
 			}
 		},
 		"files.exclude": {
