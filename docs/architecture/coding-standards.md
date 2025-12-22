@@ -1,6 +1,6 @@
 # Coding Standards — MALIB.Util.DiagramTool
 
-Status: Draft v4
+Status: Draft v5
 Owner: Architecture
 Related: docs/architecture.md, docs/architecture/tech-stack.md, docs/architecture/source-tree.md
 
@@ -59,6 +59,12 @@ Dynamic Objects and JSON
 - For JSON keys containing underscores, quote the key (underscore is concatenation in ObjectScript):
   - Example: `Set obj."max_results" = 5`
 
+MultiDimensional Property Caveat
+- Some IRIS builds declare properties as MultiDimensional (e.g., `Event.Invocation`).
+- MultiDimensional properties **cannot hold scalar values**; attempts to `Set ev.Invocation = "Inproc"` will fail.
+- Workaround: Use alternative properties (e.g., `Arrow` semantics `->>` vs `-->>`) to distinguish Inproc vs Queue.
+- When converting dynamic objects to typed classes, skip MultiDimensional properties or use accessors that work around the restriction.
+
 SQL and Determinism
 - Use read-only SQL against `Ens.MessageHeader` (SQL-only MVP).
 - Deterministic ordering is critical:
@@ -80,8 +86,21 @@ Testing Standards
 - Coverage: map tests to ACs (AC-05/06/07/09/13 for ST-003).
 
 Code Boundaries and Roles
-- Only the Dev agent writes/modifies code and tests (see `.clinerules/08-role-boundaries.md`).
+- Only the Dev agent writes/modifies code and tests (see `.clinerules/00-role-boundaries.md`).
 - Scrum Master/PO edits documentation only (stories, PRD, QA gates, hand-offs, architecture docs).
 
+Debug Utilities
+- Centralized debug class: `MALIB.Util.DiagramTool.ClineDebug`
+  - Default behavior: Debug is **OFF**; `Trace()` calls are no-ops unless explicitly enabled.
+  - API:
+    - `SetDebug(pOn)` — Enable (1) or disable (0) tracing; disabling clears `^ClineDebug`.
+    - `IsDebugEnabled()` — Returns 1 if enabled, 0 otherwise.
+    - `Trace(pMsg)` — Appends to `^ClineDebug` only when enabled.
+    - `ClearDebug()` — Clears `^ClineDebug` without changing the toggle.
+- Avoid inline `^ClineDebug` statements in production code:
+  - Use `ClineDebug.Trace()` for controlled, opt-in tracing.
+  - Remove or disable ad-hoc debug statements before merging.
+
 Change Log
+- v0.5 Added MultiDimensional property caveat; added debug utilities section; updated role boundaries reference.
 - v0.1 Initial coding standards extracted from project policies and .clinerules.

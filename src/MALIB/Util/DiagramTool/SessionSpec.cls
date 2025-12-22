@@ -20,12 +20,8 @@ Class MALIB.Util.DiagramTool.SessionSpec Extends %RegisteredObject
 /// </pre>
 ClassMethod ParseSessionSpec(pSelector As %String = "") As %List
 {
-    Set ^ClineDebug = ""
-    Set ^ClineDebug = ^ClineDebug _ "start; "
     Set tOut = $LISTBUILD()
-    Set ^ClineDebug = ^ClineDebug _ "after out; "
     Set tSelector = $GET(pSelector)
-    Set ^ClineDebug = ^ClineDebug _ "after selector; "
     If tSelector = "" Quit tOut
 
     ; Collect counts for each number to preserve duplicates, then sort

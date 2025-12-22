@@ -1,6 +1,6 @@
 # Story ST-008 — Episode-based Loop Compression
 
-Status: Ready for Review  
+Status: Done  
 Epic/PRD: docs/prd.md (v4)  
 Shards:
 - 20-functional-requirements.md (FR-04, FR-09, FR-10, FR-11)
@@ -237,6 +237,16 @@ so that complex real-world traces (like XDS/XCPD and repeated document updates) 
   - Update architecture docs to describe the extended pipeline.
   - Add ST-008 QA gate and test design documents.
 
+- [x] **T7. Episode Grouping v2 — Stack/Depth-Aware Episodes (Real Trace Fix)**
+  - Fix real-world traces where the first “envelope” request (often BusinessService → top BusinessProcess) causes `BuildEpisodes()` to create **one giant episode**, preventing episode-level loop compression for repeated subflows (e.g., repeated AddUpdateDocumentRequest blocks).
+  - Implement a stack/depth-aware episode builder that:
+    - Detects and treats the session “envelope” as non-root for episode compression (so downstream transactions become their own episodes).
+    - Captures episodes at depth 1 by default, or depth 2 when an envelope wrapper is present.
+    - Includes nested calls inside an episode (do not split nested calls into separate top-level episodes).
+    - Treats ST-004 `Loop` events as atomic (do not affect nesting depth).
+  - Add a unit/integration test reproducing Session 6641-style repeated `AddUpdateDocumentRequest` episodes and assert an episode-level `loop N times ...` block is emitted.
+  - Run the full Output test suite and confirm determinism (AC-08.4) is preserved.
+
 ## Dev Notes
 
 - This story is driven by the **Sprint Change Proposal** in `docs/hand-offs/sprint-change-proposal-st-008-episode-based-loop-compression.md`.
@@ -435,6 +445,8 @@ To satisfy AC-08.4:
 | Date       | Version | Description                                                  | Author |
 |------------|---------|--------------------------------------------------------------|--------|
 | 2025-12-10 | v0.1    | Initial draft of ST-008 episode-based loop compression story | SM     |
+| 2025-12-17 | v0.2    | Implement T7 depth-aware episode grouping + envelope-wrapper regression test; avoid MultiDimensional Invocation access in Output | Dev (James) |
+| 2025-12-17 | v0.3    | Fix Mermaid loop indentation bug (leading `0` prefix) + add regression assertion; recompiled Output and ran `%UnitTest` (20/20 pass) in `HSCUSTOM` | Dev (James) |
 
 ## Dev Agent Record
 
@@ -445,6 +457,7 @@ To satisfy AC-08.4:
 ### Debug Log References
 
 - Used `^ClineDebug2` and `^ClineDebug3` for Output/episode pipeline tracing.
+- Used `^ClineDebug` to capture full rendered diagram output while diagnosing Mermaid indentation issues; used `^ClineDebug2` to record match offsets when scanning for invalid `0`-prefixed lines.
 - Added and exercised `MALIB.Util.DiagramTool.Output.DebugST008EpisodeCompression()` to:
   - Reproduce the ST-008 contiguous/mixed episode scenario entirely in ObjectScript.
   - Log episode classes, signatures, compressible flags, and event counts into `^ClineDebug3`.
@@ -456,6 +469,7 @@ To satisfy AC-08.4:
 
 ### Completion Notes List
 
+- Identified a real-world gap: the current `BuildEpisodes()` root/termination rule can treat the entire session as one episode when the trace begins with an “envelope” request that only returns at the very end (e.g., BusinessService → top BP and final response back). This prevents ST-008 from compressing repeated inner subflows like repeated AddUpdateDocumentRequest blocks. Addressed by T7 (stack/depth-aware episode grouping).
 - Implemented a concrete episode model:
   - `MALIB.Util.DiagramTool.Episode` and `MALIB.Util.DiagramTool.EpisodeBlock` now represent episodes and episode-level loop blocks instead of `%DynamicObject` structures.
   - Episode signatures and representative labels (`Signature`, `RepLabel`, `Compressible`) are stored directly on Episode instances.
@@ -490,11 +504,15 @@ To satisfy AC-08.4:
   - Verified at runtime via `DebugST008EpisodeCompression()` and `^ClineDebug3` that the compressor only handles `MALIB.Util.DiagramTool.Episode` instances.
   - After recompilation and re-import, the remaining MultiDim error disappeared and the full Output test suite passes.
 - Verified acceptance criteria and determinism:
-  - All 19 tests in `MALIB.Test.DiagramToolOutputTest` now pass, including:
+  - All 20 tests in `MALIB.Test.DiagramToolOutputTest` pass in IRIS (namespace `HSCUSTOM`), including:
     - `TestST008EpisodeGroupingSingleMultiHop`
     - `TestST008EpisodeSignatureIgnoresTraceEvents`
     - `TestST008EpisodeLoopCompressionContiguousAndMixed`
+    - `TestST008EpisodeLoopCompressionWithEnvelopeWrapper`
   - Output determinism (including loops and warnings) is validated by existing ST-005 tests (e.g., `TestST005DeterministicOutputWithWarningsAndDedup`).
+- Compatibility fix: `MALIB.Util.DiagramTool.Event.Invocation` is MultiDimensional in the server build; updated `Output.cls` to avoid scalar reads/writes (use `Arrow` semantics for inproc detection and omit Invocation from episode signatures).
+- Fixed Mermaid indentation bug that produced a leading `0` at the start of indented loop lines (caused by using `$Justify("", width, " ")`); switched to `$Justify("", width)` in `EmitEventLine`, `EmitLoopAsPlain`, `EmitLoopInnerLines`, and `EmitEventOrLoop`.
+- Added regression guard `AssertNoZeroPrefix()` in `MALIB.Test.DiagramToolOutputTest` and executed `%UnitTest` `MALIB.Test.DiagramToolOutputTest` in IRIS namespace `HSCUSTOM` (20/20 pass) after recompiling `MALIB.Util.DiagramTool.Output`.
 - Updated documentation to match implementation:
   - Extended `docs/prd/50-diagramming-rules.md` with an explicit ST-008 episode-based loop section.
   - Extended `docs/prd/60-acceptance-criteria.md` with AC-14..AC-17 for episodes.
@@ -524,6 +542,8 @@ To satisfy AC-08.4:
       - `TestST008EpisodeGroupingSingleMultiHop`
       - `TestST008EpisodeSignatureIgnoresTraceEvents`
       - `TestST008EpisodeLoopCompressionContiguousAndMixed`
+      - `TestST008EpisodeLoopCompressionWithEnvelopeWrapper`
+    - Added `AssertNoZeroPrefix()` regression helper and applied it to loop-related tests to prevent Mermaid output lines inside loops from starting with a literal `0`.
     - Verified no regressions in existing ST-004/005/007 tests.
   - (No ST-008-specific changes required in `src/MALIB/Test/DiagramToolTest.cls`; orchestration behavior is already exercised and now benefits from ST-008 under the hood.)
 
@@ -554,6 +574,48 @@ To satisfy AC-08.4:
   - By level: Unit 7, Integration 3, E2E 0
   - By priority: P1 = 6, P2 = 4
 
+### QA Gate Review (2025-12-22)
+
+**Gate Status: PASS** ✅
+
+**Reviewer:** Quinn (Test Architect)
+
+**Test Execution Summary:**
+- `MALIB.Test.DiagramToolOutputTest`: **20/20 passed**
+- `MALIB.Test.DiagramToolTest`: **7/7 passed**
+- **Total: 27/27 passed** (including 4 ST-008-specific tests)
+- Namespace: HSCUSTOM
+- Execution date: 2025-12-22
+
+**ST-008-Specific Tests Executed:**
+| Test Method | AC Coverage | Result |
+|-------------|-------------|--------|
+| `TestST008EpisodeGroupingSingleMultiHop` | AC-08.1 | ✅ PASS |
+| `TestST008EpisodeSignatureIgnoresTraceEvents` | AC-08.1 | ✅ PASS |
+| `TestST008EpisodeLoopCompressionContiguousAndMixed` | AC-08.2, AC-08.4 | ✅ PASS |
+| `TestST008EpisodeLoopCompressionWithEnvelopeWrapper` | AC-08.2, AC-08.3 | ✅ PASS |
+
+**AC Coverage Assessment:**
+- **AC-08.1 (Episode Grouping & Signature):** ✅ Covered by UNIT-001, UNIT-003
+- **AC-08.2 (Episode-Based Loop Compression):** ✅ Covered by UNIT-004/005 (contiguous/mixed), UNIT-010 (envelope wrapper)
+- **AC-08.3 (Interaction with Pipeline):** ✅ Covered indirectly via existing ST-004/005/007 tests + envelope wrapper test
+- **AC-08.4 (Determinism):** ✅ Covered via ST-005 determinism tests and signature equality mechanism
+
+**NFR Validation:**
+- Security: PASS — No new auth, network I/O, or persistence surfaces
+- Performance: PASS — O(n) algorithms with forward scans
+- Reliability: PASS — Deterministic output, trace-insensitive signatures
+- Maintainability: PASS — Clean Episode/EpisodeBlock model classes
+
+**Minor Observations (Low Severity):**
+1. Some test design scenarios (UNIT-006/007/008/009) covered indirectly via ST-004/ST-005 tests
+2. No dedicated orchestration-level ST-008 test in DiagramToolTest.cls
+3. ST-008-INT-001 (XDS/XCPD fixture) not explicitly tested with Ens.MessageHeader data
+
+**Quality Score:** 95/100
+
+**Gate File:** `docs/qa/gates/st.008-episode-based-loop-compression.yml`
+
 ### Scenarios to Implement (Dev Agent Guidance)
 
 The Dev agent SHOULD implement unit/integration tests corresponding to the following scenario IDs, mapped to AC-08.1–AC-08.4. These are intended to live primarily in:
@@ -563,27 +625,27 @@ The Dev agent SHOULD implement unit/integration tests corresponding to the follo
 
 #### AC-08.1 — Episode Grouping and Signature (Business-Only)
 
-- **ST-008-UNIT-001** — Episode grouping (simple multi-hop flow → single episode)
-- **ST-008-UNIT-002** — Business-only signature equality (identical business events, no trace)
-- **ST-008-UNIT-003** — Trace-insensitivity (episodes differ only by trace/log events)
-- **ST-008-INT-001** — Grouping in context (small realistic correlated trace via `GenerateDiagrams`)
+- **ST-008-UNIT-001** — Episode grouping (simple multi-hop flow → single episode) ✅ Implemented
+- **ST-008-UNIT-002** — Business-only signature equality (identical business events, no trace) ✅ Covered
+- **ST-008-UNIT-003** — Trace-insensitivity (episodes differ only by trace/log events) ✅ Implemented
+- **ST-008-INT-001** — Grouping in context (small realistic correlated trace via `GenerateDiagrams`) ⚠️ Indirect
 
 #### AC-08.2 — Episode-Based Loop Compression for Repeated Flows
 
-- **ST-008-UNIT-004** — Contiguous identical episodes compressed into `loop N times`
-- **ST-008-UNIT-005** — Episodes with different business structure NOT compressed together
-- **ST-008-INT-002** — XDS/XCPD-style or AddUpdateDocument repeated flows compressed at episode level
+- **ST-008-UNIT-004** — Contiguous identical episodes compressed into `loop N times` ✅ Implemented
+- **ST-008-UNIT-005** — Episodes with different business structure NOT compressed together ✅ Implemented
+- **ST-008-INT-002** — XDS/XCPD-style or AddUpdateDocument repeated flows compressed at episode level ✅ Implemented (envelope wrapper test)
 
 #### AC-08.3 — Interaction with Pair-Level Loops, Dedup, and LabelMode
 
-- **ST-008-INT-003** — Pair-level loops from ST-004 remain correct with episode-based compression enabled
-- **ST-008-UNIT-006** — Dedup keys unchanged for structurally identical diagrams (with/without episodes)
-- **ST-008-UNIT-007** — LabelMode full/short behavior unaffected by episode loops
+- **ST-008-INT-003** — Pair-level loops from ST-004 remain correct with episode-based compression enabled ✅ Indirect
+- **ST-008-UNIT-006** — Dedup keys unchanged for structurally identical diagrams (with/without episodes) ✅ Indirect (ST-005)
+- **ST-008-UNIT-007** — LabelMode full/short behavior unaffected by episode loops ✅ Indirect (ST-005)
 
 #### AC-08.4 — Determinism and Stability
 
-- **ST-008-UNIT-008** — Deterministic episode building and signatures across runs
-- **ST-008-UNIT-009** — Deterministic episode-based loops across runs (same loop blocks and counts)
+- **ST-008-UNIT-008** — Deterministic episode building and signatures across runs ✅ Indirect (ST-005)
+- **ST-008-UNIT-009** — Deterministic episode-based loops across runs (same loop blocks and counts) ✅ Indirect (ST-005)
 
 ### Execution & Future Gate
 
@@ -591,4 +653,4 @@ The Dev agent SHOULD implement unit/integration tests corresponding to the follo
   1. P1 unit tests (ST-008-UNIT-001/002/003/004/005/008/009)
   2. P1 integration tests (ST-008-INT-002/003)
   3. P2 unit tests (ST-008-UNIT-006/007)
-- A future QA gate file `docs/qa/gates/st.008-episode-loop-compression.yml` SHOULD include the summarized test design block from the assessment and reference the `%UnitTest` runs that cover these scenarios.
+- QA gate file: `docs/qa/gates/st.008-episode-based-loop-compression.yml` ✅ Created

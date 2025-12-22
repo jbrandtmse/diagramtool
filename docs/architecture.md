@@ -1,7 +1,7 @@
 # Architecture Overview — MALIB.Util.DiagramTool
 
-Status: Draft v4  
-Owner: Architecture  
+Status: Draft v5  
+Owner: Architecture
 Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, docs/dev-notes-correlation.md, docs/stories/story-005-output-and-dedup.md, docs/stories/story-006-orchestration-and-entrypoint.md, docs/stories/story-007-participant-ordering-by-first-appearance.md, docs/stories/story-008-episode-based-loop-compression.md
 
 ## Purpose
@@ -46,11 +46,19 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 
 3. **ST-003 — Correlation Rules (Inproc vs Queue, Warnings)**
    - Class: `MALIB.Util.DiagramTool.Correlation`
-   - Responsibility: Map ordered rows into a correlated **event list** with arrows and warnings.
+   - Responsibility: Map ordered rows into a correlated **event list** (%DynamicArray of %DynamicObject) with arrows and warnings.
    - Key points:
      - Forward-only scan over ordered rows from ST-002.
      - Inproc and Queue correlation rules, including `CorrespondingMessageId` and `ReturnQueueName` fallback.
      - Non-fatal anomalies recorded in `Notes` as human-readable warning text.
+
+3a. **ConvertDynamicToEvents (internal pipeline step)**
+   - Class: `MALIB.Util.DiagramTool.Output`
+   - Responsibility: Convert %DynamicArray of %DynamicObject (from CorrelateEvents) to %DynamicArray of typed `MALIB.Util.DiagramTool.Event` objects.
+   - Purpose: Enables strongly-typed handling in loop detection and episode grouping.
+   - Implementation caveat:
+     - `Event.Invocation` is **not copied** from dynamic data because some IRIS builds declare it as MultiDimensional, which cannot hold scalar values.
+     - Arrow semantics (`->>` vs `-->>`) are used instead of Invocation for distinguishing Inproc vs Queue calls.
 
 4. **ST-004 — Loop Detection (Contiguous Identical Pairs)**
    - Class: `MALIB.Util.DiagramTool.Output`
@@ -88,6 +96,12 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
      - Episode signatures ignore trace/log events (e.g. `HS.Util.Trace.*`), which are still rendered inside the episode.
      - Only **contiguous** runs of identical episode signatures are compressed.
      - Episode-based loops are additive and layered on top of ST-004 pair-level loops.
+   - Algorithm (T7 — Depth-Aware Episode Grouping):
+     - Uses a stack/depth approach for INPROC (`->>`) calls to handle nested call patterns.
+     - Emits episodes at **target depth** (normally 1, but 2 when an "envelope wrapper" session is detected).
+     - Envelope detection heuristics: first request label is `HS.Message.XMLMessage`, or source ends with `.Services` and destination ends with `.Process`, with response near the end.
+     - ST-004 Loop events are treated as atomic and do not affect nesting depth.
+     - Nested events remain inside the current episode rather than starting new top-level episodes.
 
 ## Key Decisions (aligned with PRD v4)
 
@@ -158,9 +172,12 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
     - An ordered `%DynamicArray` of events.
     - Business-only `Signature` and `RepLabel` fields.
     - A `Compressible` flag indicating eligibility for episode-level loops.
+    - `RootSrc` and `RootDst` tracking the episode's initiating request endpoints.
 - Signature semantics:
   - Episode signatures are computed only from **business events**:
-    - Per-event fragments: `Src | Arrow | Dst | Label(full) | Invocation | EventType`.
+    - Per-event fragments for normal events: `Src | Arrow | Dst | Label(full) | EventType`.
+    - Per-event fragments for LOOP events expand to two logical lines: request and response fragments with `LOOPREQ`/`LOOPRESP` markers.
+    - **Note:** Invocation is intentionally excluded from signature fragments because `Event.Invocation` may be MultiDimensional on some IRIS builds; arrow semantics distinguish Inproc vs Queue.
     - Trace/log events (e.g. `HS.Util.Trace.*`) are excluded from the signature but kept in the episode body for rendering.
   - Two episodes are equal when their business-event fragment sequences are identical.
 - Compression:
@@ -299,7 +316,21 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 - Story ST-008: `docs/stories/story-008-episode-based-loop-compression.md`  
   (Defines episode grouping, business-only episode signatures, and episode-based loop compression layered on top of ST-004.)
 
+### Debug Infrastructure
+
+- Centralized debug utility:
+  - Class: `MALIB.Util.DiagramTool.ClineDebug`
+  - Default behavior: Debug is **OFF** by default; `Trace()` calls are no-ops unless explicitly enabled via `SetDebug(1)`.
+  - Purpose: Provides a controlled mechanism for ad-hoc debugging without polluting production code with inline `^ClineDebug` statements.
+  - API:
+    - `SetDebug(pOn)` — Enable/disable debug tracing; disabling also clears the buffer.
+    - `IsDebugEnabled()` — Check if debug is currently enabled.
+    - `Trace(pMsg)` — Append message to `^ClineDebug` only when enabled.
+    - `ClearDebug()` — Clear the buffer without changing the toggle.
+
 ## Change Log
 
+- v0.5 Added ConvertDynamicToEvents pipeline step; documented Event.Invocation MultiDimensional caveat; detailed T7 depth-aware episode grouping algorithm; clarified episode signature fragment format; added ClineDebug utility documentation.
+- v0.4 Cleaned up inline debug statements throughout codebase; removed deprecated DebugDumpHeaders and TestST006HeaderDebug.
 - v0.2 Documented ST-004 loop compression and ST-005 output/dedup/label/warning behavior; aligned with ST-006 orchestration and tests.
 - v0.1 Initial architecture overview aligning with PRD v4 and ST-003 policy selections.

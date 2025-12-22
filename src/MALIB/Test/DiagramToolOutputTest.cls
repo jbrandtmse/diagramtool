@@ -38,6 +38,26 @@ Method PushRow(ByRef pArr As %DynamicArray, pRow As %RegisteredObject) As %Statu
     Quit $$$OK
 }
 
+/// Regression helper: Mermaid indentation must never introduce a literal leading "0"
+/// (this occurred when $Justify() was called with a 3rd "numeric formatting" arg).
+Method AssertNoZeroPrefix(pDiagram As %String, pContext As %String = "") As %Status
+{
+    Set tSC = $$$OK
+    Set tCtx = $Select($Get(pContext,"")'="":" ("_pContext_")", 1:"")
+
+    ; Look for newline + "0" or newline + " 0" at the start of any diagram line.
+    ; Use $Find() so we can debug exactly what matched.
+    Set idxCRLF0   = $Find(pDiagram, $Char(13,10)_"0")
+    Set idxCRLFsp0 = $Find(pDiagram, $Char(13,10)_" 0")
+    Set idxLF0     = $Find(pDiagram, $Char(10)_"0")
+    Set idxLFsp0   = $Find(pDiagram, $Char(10)_" 0")
+
+    Set tHasZero = ((idxCRLF0>0)!(idxCRLFsp0>0)!(idxLF0>0)!(idxLFsp0>0))
+
+    Do $$$AssertTrue('tHasZero, "No diagram lines may start with a '0' prefix"_tCtx)
+    Quit tSC
+}
+
 /// Verify AppendDiagramsToFile appends to an existing file and writes a divider between diagrams
 Method TestAppendDiagramsToFileAppendAndDivider() As %Status
 {
@@ -88,8 +108,8 @@ Method TestST004LoopThreeIdenticalInprocPairs() As %Status
 
     Set diag = ""
     Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
-    Set ^ClineDebug = diag
     Do $$$AssertStatusOK(tSC, "BuildDiagramForSession OK for 3 identical inproc pairs")
+    Do ..AssertNoZeroPrefix(diag, "st.004 loop inner lines")
 
     ; Expect a single loop header with count 3 and only one pair of lines inside
     Set hasLoop = (diag["loop 3 times Unit.Test.ST004.InprocReq")
@@ -688,6 +708,7 @@ Method TestST008EpisodeLoopCompressionContiguousAndMixed() As %Status
     Set diag = ""
     Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
     Do $$$AssertStatusOK(tSC, "st.008-UNIT-004/005 BuildDiagramForSession OK for mixed episodes")
+    Do ..AssertNoZeroPrefix(diag, "st.008 episode loop inner lines (mixed)")
 
     ; Contiguous identical episodes A should be compressed into a loop 2 times
     Set hasLoopA = (diag["loop 2 times Unit.Test.ST008.LoopedReqA")
@@ -696,6 +717,51 @@ Method TestST008EpisodeLoopCompressionContiguousAndMixed() As %Status
     ; Episode B has different business structure and must not be merged into A's loop
     Set hasLoopB2 = (diag["loop 2 times Unit.Test.ST008.LoopedReqB")
     Do $$$AssertTrue('hasLoopB2, "st.008-UNIT-005 differing episodes not compressed together into single loop")
+
+    Quit $$$OK
+}
+
+/// ST-008 UNIT-010: Envelope wrapper does not swallow repeated inner sub-episodes (Session 6641-style)
+Method TestST008EpisodeLoopCompressionWithEnvelopeWrapper() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108010
+
+    ; Envelope request: Services -> Process (stays open until the very end)
+    Do ..PushRow(rows, ..NewRow(9001, "Inproc", "Request", "A.Services", "B.Process", "", "", "HS.Message.XMLMessage", sess))
+
+    ; Inner episode #1 (the thing we want to compress):
+    ; B.Process -> C.Manager -> D.Operations -> C.Manager -> B.Process
+    Do ..PushRow(rows, ..NewRow(9002, "Inproc", "Request",  "B.Process", "C.Manager", "", "", "MA.Message.AddUpdateDocumentRequest", sess))
+    Do ..PushRow(rows, ..NewRow(9003, "Inproc", "Request",  "C.Manager", "D.Operations", "", "", "MA.Message.AddUpdateDocumentRequest", sess))
+    Do ..PushRow(rows, ..NewRow(9004, "Inproc", "Response", "D.Operations", "C.Manager", "", 9003, "HS.Message.XMLMessage", sess))
+    Do ..PushRow(rows, ..NewRow(9005, "Inproc", "Response", "C.Manager", "B.Process", "", 9002, "HS.Message.XMLMessage", sess))
+
+    ; Inner episode #2 (identical, contiguous)
+    Do ..PushRow(rows, ..NewRow(9012, "Inproc", "Request",  "B.Process", "C.Manager", "", "", "MA.Message.AddUpdateDocumentRequest", sess))
+    Do ..PushRow(rows, ..NewRow(9013, "Inproc", "Request",  "C.Manager", "D.Operations", "", "", "MA.Message.AddUpdateDocumentRequest", sess))
+    Do ..PushRow(rows, ..NewRow(9014, "Inproc", "Response", "D.Operations", "C.Manager", "", 9013, "HS.Message.XMLMessage", sess))
+    Do ..PushRow(rows, ..NewRow(9015, "Inproc", "Response", "C.Manager", "B.Process", "", 9012, "HS.Message.XMLMessage", sess))
+
+    ; Envelope response: Process -> Services (matches the first envelope request)
+    Do ..PushRow(rows, ..NewRow(9020, "Inproc", "Response", "B.Process", "A.Services", "", 9001, "HS.Message.XMLMessage", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008-UNIT-010 BuildDiagramForSession OK for envelope wrapper scenario")
+    Do ..AssertNoZeroPrefix(diag, "st.008 episode loop inner lines (envelope wrapper)")
+
+    ; We expect the repeated inner episode to be compressed as an episode-level loop
+    Set hasLoop = (diag["loop 2 times MA.Message.AddUpdateDocumentRequest")
+    Do $$$AssertTrue(hasLoop, "st.008-UNIT-010 inner repeated sub-episode compressed into loop 2 times")
+
+    ; Envelope request/response should still be visible (not swallowed into a giant episode)
+    Do $$$AssertTrue(diag["A.Services ->> B.Process : HS.Message.XMLMessage", "st.008-UNIT-010 envelope request line present")
+    Do $$$AssertTrue(diag["B.Process ->> A.Services : HS.Message.XMLMessage", "st.008-UNIT-010 envelope response line present")
+
+    ; Inner episode body should be emitted once (inside the loop)
+    Set outerReqCount = $Length(diag, "B.Process ->> C.Manager : MA.Message.AddUpdateDocumentRequest")-1
+    Do $$$AssertEquals(outerReqCount, 1, "st.008-UNIT-010 inner episode outer request emitted once due to loop compression")
 
     Quit $$$OK
 }

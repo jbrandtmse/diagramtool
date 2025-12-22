@@ -1,6 +1,6 @@
 # Source Tree — MALIB.Util.DiagramTool
 
-Status: Draft v4
+Status: Draft v5
 Owner: Architecture
 Related: docs/architecture.md, docs/architecture/coding-standards.md, docs/architecture/tech-stack.md
 
@@ -14,9 +14,22 @@ High-Level Layout
     - MessageHeaderBase.cls
   - MALIB/
     - Util/
-      - DiagramTool.cls           # Implementation target (ST-002 loader, ST-003 correlation methods to be added by Dev)
+      - DiagramTool.cls                    # ST-006 Orchestration entrypoint (GenerateDiagrams) + facades
+      - DiagramTool/
+        - ClineDebug.cls                   # Centralized debug utility (default-off)
+        - Correlation.cls                  # ST-003 Correlation rules (Inproc/Queue pairing, warnings)
+        - Episode.cls                      # ST-008 Episode container class
+        - EpisodeBlock.cls                 # ST-008 Episode loop block container
+        - Event.cls                        # Typed event class for pipeline processing
+        - Loader.cls                       # ST-002 Data loading (SQL-only, deterministic ordering)
+        - Output.cls                       # ST-004/05/07/08 Loop detection, output, participant ordering, episode compression
+        - SessionSpec.cls                  # ST-001 Session selector parsing
     - Test/
-      - DiagramToolTest.cls       # Unit tests using %UnitTest (extend or add new test classes here)
+      - DiagramToolCorrelationTest.cls     # ST-003 correlation tests
+      - DiagramToolLoaderTest.cls          # ST-002 loader tests
+      - DiagramToolOutputTest.cls          # ST-004/05/07/08 output/loop/participant/episode tests
+      - DiagramToolSessionSpecTest.cls     # ST-001 session spec tests
+      - DiagramToolTest.cls                # ST-006 orchestration tests
 - docs/ — Documentation (stories, PRD shards, QA gates, hand-offs, architecture)
   - prd/
     - 20-functional-requirements.md
@@ -43,8 +56,10 @@ High-Level Layout
     - source-tree.md                    # This file
 
 Key Conventions
-- Implementation target
-  - ST-003: Add correlation methods to src/MALIB/Util/DiagramTool.cls (Dev agent only; see .clinerules/08-role-boundaries.md).
+- Implementation structure
+  - Main entrypoint: `src/MALIB/Util/DiagramTool.cls` (GenerateDiagrams + facades)
+  - Feature classes: `src/MALIB/Util/DiagramTool/*.cls` (one class per story/concern)
+  - Dev agent only writes code/tests (see .clinerules/00-role-boundaries.md).
 - Tests
   - Use src/MALIB/Test/ for %UnitTest test classes and methods (Test* methods).
   - Assertions via $$$ macros (AssertEquals, AssertTrue, AssertStatusOK).
@@ -62,4 +77,5 @@ Policy Reminder
 - See .clinerules/08-role-boundaries.md for enforcement details.
 
 Change Log
+- v0.5 Updated to reflect ST-001..ST-008 class structure with detailed file descriptions; added DiagramTool subpackage classes.
 - v0.1 Initial source tree map aligned with PRD v4 and ST-003 handoff.

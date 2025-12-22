@@ -82,7 +82,6 @@ Method TestST006SingleSessionOrchestration() As %Status
 {
     Set sid = 9100001
     Do ..CleanupSession(sid)
-    Set ^ClineDebug3 = "ST006Single; "
 
     ; Insert request/response pair for inproc invocation (INSERT-only)
     Set idReq = ..InsertConfiguredHeader(sid,
@@ -105,7 +104,6 @@ Method TestST006SingleSessionOrchestration() As %Status
 
     Set tText = ""
     Set tSC = ##class(MALIB.Util.DiagramTool).GenerateDiagrams(sid, "", "full", 1, .tText)
-    Set ^ClineDebug = tText
     Do $$$AssertStatusOK(tSC, "GenerateDiagrams returned OK for single session")
     Do $$$AssertTrue(tText["sequenceDiagram", "Output contains sequenceDiagram header")
     Do $$$AssertTrue(tText["%% Session "_sid, "Output contains session header comment")
@@ -237,7 +235,6 @@ Method TestST006LabelModeShort() As %Status
     Set selector = sid
     Set tText = ""
     Set tSC = ##class(MALIB.Util.DiagramTool).GenerateDiagrams(selector, "", "short", 1, .tText)
-    Set ^ClineDebug = tText
     Do $$$AssertStatusOK(tSC, "GenerateDiagrams returned OK for labelMode short")
 
     ; Tightened expectations: short labels and no fully-qualified class names
@@ -312,62 +309,13 @@ Method TestST006AppendOnlyOutputWithDivider() As %Status
     Set selector = sid1_","_sid2
     Set tText = ""
     Set tSC = ##class(MALIB.Util.DiagramTool).GenerateDiagrams(selector, outFile, "full", 0, .tText)
-    Set ^ClineDebug = tText
 
     ; Verify combined text has expected number of diagrams
     Set diagCountInText = $Length(tText, "sequenceDiagram")-1
-    Set ^ClineDebug2 = "diagCount="_diagCountInText_"; text="_tText
     Do $$$AssertEquals(diagCountInText, 2, "Combined text contains two diagrams")
 
     Do ..CleanupSession(sid1)
     Do ..CleanupSession(sid2)
-    Quit $$$OK
-}
-
-/// Debug helper test: inspect raw Ens.MessageHeader values for an ST-006-style session
-Method TestST006HeaderDebug() As %Status
-{
-    Set sid = 9100001
-    Do ..CleanupSession(sid)
-    Set ^ClineDebug3 = "ST006HeaderDebug; "
-
-    ; Insert request/response pair matching TestST006SingleSessionOrchestration (INSERT-only)
-    Set idReq = ..InsertConfiguredHeader(sid,
-        "2024-01-01 10:00:00",
-        "Unit.Test.ST006.Request",
-        "Inproc",
-        "A",
-        "B",
-        "",
-        0)
-
-    Set idResp = ..InsertConfiguredHeader(sid,
-        "2024-01-01 10:00:01",
-        "Unit.Test.ST006.Response",
-        "Inproc",
-        "B",
-        "A",
-        "",
-        idReq)
-
-    ; Read back the rows directly via SQL
-    Set invReq = "", typeReq = "", rqnReq = "", corrReq = "", srcReq = "", dstReq = ""
-    &sql(SELECT Invocation, "Type", ReturnQueueName, CorrespondingMessageId,
-                 SourceConfigName, TargetConfigName
-         INTO :invReq, :typeReq, :rqnReq, :corrReq, :srcReq, :dstReq
-         FROM Ens.MessageHeader WHERE ID = :idReq)
-    Set ^ClineDebug3 = ^ClineDebug3_"Req inv="_invReq_" type="_typeReq_" src="_srcReq_" dst="_dstReq_" rqn="_rqnReq_" corr="_corrReq_"; "
-
-    Set invResp = "", typeResp = "", rqnResp = "", corrResp = "", srcResp = "", dstResp = ""
-    &sql(SELECT Invocation, "Type", ReturnQueueName, CorrespondingMessageId,
-                 SourceConfigName, TargetConfigName
-         INTO :invResp, :typeResp, :rqnResp, :corrResp, :srcResp, :dstResp
-         FROM Ens.MessageHeader WHERE ID = :idResp)
-    Set ^ClineDebug3 = ^ClineDebug3_"Resp inv="_invResp_" type="_typeResp_" src="_srcResp_" dst="_dstResp_" rqn="_rqnResp_" corr="_corrResp_"; "
-
-    ; Now dump via Loader helper to compare
-    Set tSC = ##class(MALIB.Util.DiagramTool.Loader).DebugDumpHeaders(sid)
-    Do $$$AssertStatusOK(tSC, "DebugDumpHeaders OK")
     Quit $$$OK
 }
 

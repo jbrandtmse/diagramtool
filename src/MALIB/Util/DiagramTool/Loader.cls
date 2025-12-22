@@ -15,10 +15,9 @@ Class MALIB.Util.DiagramTool.Loader Extends %RegisteredObject
 /// <pre>ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %DynamicArray, pForceIdOnlyOrder As %Boolean = 0) As %Status</pre>
 ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %DynamicArray, pForceIdOnlyOrder As %Boolean = 0) As %Status
 {
-    ; Initialize status, output, and debug
+    ; Initialize status and output
     Set tSC = $$$OK
     Set pRows = ##class(%DynamicArray).%New()
-    Set ^ClineDebug3 = "Loader sid="_pSessionId_"; "
 
     ; Best-effort: empty result for invalid/non-positive session id
     If (+$Get(pSessionId,0))<1 {
@@ -84,9 +83,6 @@ ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %Dynam
             }
         }
 
-        ; Debug snapshot for each loaded row
-        Set ^ClineDebug3 = ^ClineDebug3_"ID="_tID_" Inv="_$Get(tInvocation)_" TypeRaw="_$Get(tType)_" TypeLogical="_tTypeLogical_" Src="_$Get(tSource)_" Dst="_$Get(tTarget)_" RQN="_$Get(tRet)_" Corr="_$Get(tCorr)_"; "
-
         Set row = ##class(%DynamicObject).%New()
         Set row.ID = tID
         Set row.Invocation = $Get(tInvocation)
@@ -107,31 +103,6 @@ ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %Dynam
     } ElseIf tCur="C2" {
         &sql(CLOSE C2)
     }
-
-    Quit tSC
-}
-
-/// Debug helper — dump raw Ens.MessageHeader rows for a session
-ClassMethod DebugDumpHeaders(pSessionId As %Integer) As %Status
-{
-    Set tSC = $$$OK
-    Set ^ClineDebug3 = $Get(^ClineDebug3)_"Dump sid="_pSessionId_"; "
-    Set tID="", tInv="", tType="", tRQN="", tCorr="", tSrc="", tDst=""
-
-    &sql(DECLARE C CURSOR FOR
-        SELECT ID, Invocation, "Type", ReturnQueueName, CorrespondingMessageId,
-               SourceConfigName, TargetConfigName
-        FROM Ens.MessageHeader
-        WHERE SessionId = :pSessionId
-        ORDER BY ID)
-
-    &sql(OPEN C)
-    For {
-        &sql(FETCH C INTO :tID, :tInv, :tType, :tRQN, :tCorr, :tSrc, :tDst)
-        Quit:SQLCODE
-        Set ^ClineDebug3 = ^ClineDebug3_"ID="_tID_" Inv="_$Get(tInv)_" Type="_$Get(tType)_" RQN="_$Get(tRQN)_" Corr="_$Get(tCorr)_" Src="_$Get(tSrc)_" Dst="_$Get(tDst)_"; "
-    }
-    &sql(CLOSE C)
 
     Quit tSC
 }

@@ -1,0 +1,88 @@
+schema: 1
+story: "st.008"
+story_title: "Episode-based Loop Compression"
+gate: PASS
+status_reason: "All ST-008 episode-based loop compression tests passed (4/4 ST-008-specific tests; 27/27 total across DiagramToolOutputTest and DiagramToolTest). Implementation aligns with AC-08.1–AC-08.4 and covers episode grouping, business-only signatures, trace-insensitivity, episode-level loop compression, envelope wrapper handling, and determinism."
+reviewer: "Quinn (Test Architect) — Tests executed via IRIS %UnitTest in HSCUSTOM namespace"
+updated: "2025-12-22T02:37:00Z"
+
+top_issues:
+  - id: "TEST-008-001"
+    severity: low
+    finding: "Some test design scenarios (ST-008-UNIT-006/007/008/009) are covered indirectly via existing ST-004/ST-005 tests rather than dedicated ST-008 tests."
+    suggested_action: "Consider adding explicit ST-008 tests for dedup key stability, labelMode interaction, and determinism if edge cases emerge in production."
+  - id: "TEST-008-002"
+    severity: low
+    finding: "No dedicated ST-008 integration test in DiagramToolTest.cls (orchestration level); episode-based compression is exercised implicitly through the pipeline."
+    suggested_action: "Add a TestST008EpisodeLevelLoopViaGenerateDiagrams test using a realistic multi-hop trace to validate end-to-end behavior at orchestration level."
+  - id: "TRACE-008-001"
+    severity: low
+    finding: "ST-008-INT-001 (grouping with realistic XDS/XCPD trace) is not explicitly tested with Ens.MessageHeader fixture data."
+    suggested_action: "Add a small fixture-based integration test using representative production trace data for deeper validation."
+
+waiver:
+  active: false
+
+quality_score: 95
+expires: "2026-01-05T00:00:00Z"
+
+evidence:
+  tests_reviewed: 27
+  tests_passed: 27
+  tests_failed: 0
+  tests_errored: 0
+  st008_specific_tests: 4
+  risks_identified: 0
+  trace:
+    ac_covered: [1, 2, 3, 4]  # AC-08.1, AC-08.2, AC-08.3, AC-08.4
+    ac_gaps: []
+  test_execution:
+    class_1: "MALIB.Test.DiagramToolOutputTest"
+    class_1_result: "20/20 passed"
+    class_2: "MALIB.Test.DiagramToolTest"
+    class_2_result: "7/7 passed"
+    namespace: "HSCUSTOM"
+    execution_date: "2025-12-22"
+
+test_design:
+  reference: "docs/qa/assessments/st.008-test-design-20251210.md"
+  scenarios_total: 10
+  by_level:
+    unit: 7
+    integration: 3
+    e2e: 0
+  by_priority:
+    p0: 0
+    p1: 6
+    p2: 4
+    p3: 0
+  coverage_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: "ST-008 operates purely on in-memory correlated events; no new auth, network I/O, or persistence surfaces are introduced. Episode/EpisodeBlock models are type-safe %RegisteredObject instances."
+  performance:
+    status: PASS
+    notes: "Episode building, signature computation, and loop compression are O(n) in the number of events using forward scans with stack-based depth tracking. No quadratic or recursive patterns."
+  reliability:
+    status: PASS
+    notes: "All 4 ST-008 tests passed in IRIS %UnitTest. Determinism is validated through existing ST-005 tests and the episode signature equality mechanism explicitly ignores trace/log noise."
+  maintainability:
+    status: PASS
+    notes: "Episode-based logic is cleanly isolated in MALIB.Util.DiagramTool.Output with dedicated Episode/EpisodeBlock model classes. Code follows ObjectScript coding standards with proper error handling and doc comments."
+
+recommendations:
+  immediate: []
+  future:
+    - action: "Add explicit ST-008 tests for dedup key stability and labelMode interaction with episode loops."
+      refs: ["src/MALIB/Test/DiagramToolOutputTest.cls"]
+    - action: "Add orchestration-level ST-008 integration test in DiagramToolTest.cls using realistic trace data."
+      refs: ["src/MALIB/Test/DiagramToolTest.cls"]
+    - action: "Consider adding fixture-based test using Ens.MessageHeader rows that mirror production XDS/XCPD traces."
+      refs: ["src/MALIB/Test/DiagramToolTest.cls"]
+
+history:
+  - at: "2025-12-22T02:37:00Z"
+    gate: PASS
+    note: "Initial QA review. All 27 tests passed. AC-08.1–AC-08.4 covered. Minor observations for future test enhancement documented."

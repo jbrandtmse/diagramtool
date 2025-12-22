@@ -9,7 +9,6 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
 {
     Set tSC = $$$OK
     Set pDiagram = ""
-    Set ^ClineDebug2 = "BuildDiag sid="_pSessionId_"; "
 
     ; Empty or invalid rows -> minimal diagram
     If '$IsObject(pRows) {
@@ -23,15 +22,6 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
                        "%% Session "_pSessionId_$Char(13,10)_
                        "%% No data available (filtered or empty)"
         Quit tSC
-    }
-
-    ; Log raw rows for debugging (size and endpoints)
-    Set ^ClineDebug2 = ^ClineDebug2_"rowsz="_pRows.%Size()_"; "
-    Set k=""
-    For k=0:1:pRows.%Size()-1 {
-        Set row = pRows.%Get(k)
-        Continue:'$IsObject(row)
-        Set ^ClineDebug2 = ^ClineDebug2_"rowID="_row.%Get("ID")_" src="_row.%Get("SourceConfigName")_" dst="_row.%Get("TargetConfigName")_"; "
     }
 
     ; Correlate events from rows (dynamic objects)
@@ -161,7 +151,7 @@ ClassMethod ConvertDynamicToEvents(pIn As %DynamicArray, Output pOut As %Dynamic
         Set ev.Dst                    = d.%Get("Dst")
         Set ev.Label                  = d.%Get("Label")
         Set ev.Arrow                  = d.%Get("Arrow")
-        Set ev.Invocation             = d.%Get("Invocation")
+        ; NOTE: Event.Invocation may be MultiDimensional on some builds; do not set as scalar here.
         Set ev.ID                     = +d.%Get("ID")
         Set ev.PairWithID             = +d.%Get("PairWithID")
         Set ev.CorrespondingMessageId = +d.%Get("CorrespondingMessageId")
@@ -399,7 +389,7 @@ ClassMethod EmitEventLine(ByRef pLines As %String, pEvent As MALIB.Util.DiagramT
     Set pad = ""
     If +$Get(pIndent,0)>0 {
         ; Two spaces per indent level
-        Set pad = $Justify("", (pIndent*2), " ")
+        Set pad = $Justify("", (pIndent*2))
     }
 
     ; Emit notes as %% comments when present
@@ -449,7 +439,7 @@ ClassMethod EmitLoopAsPlain(ByRef pLines As %String, pLoopEvent As MALIB.Util.Di
     Set pad = ""
     If +$Get(pIndent,0)>0 {
         ; Two spaces per indent level
-        Set pad = $Justify("", (pIndent*2), " ")
+        Set pad = $Justify("", (pIndent*2))
     }
 
     ; Treat as a single pair: emit request then response lines without loop
@@ -481,7 +471,7 @@ ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util
 
     Set pad = ""
     If +$Get(pIndent,0)>0 {
-        Set pad = $Justify("", (pIndent*2), " ")
+        Set pad = $Justify("", (pIndent*2))
     }
 
     Set reqSrc   = pLoopEvent.ReqSrc
@@ -514,7 +504,7 @@ ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.Diagra
     Set pad = ""
     If +$Get(pIndent,0)>0 {
         ; Two spaces per indent level
-        Set pad = $Justify("", (pIndent*2), " ")
+        Set pad = $Justify("", (pIndent*2))
     }
 
     ; ST-004 pair-level loop event
@@ -600,12 +590,12 @@ ClassMethod BuildEpisodeSignatureFragment(pEvent As MALIB.Util.DiagramTool.Event
     Set dst   = pEvent.Dst
     Set lbl   = ..NormalizeLabelForMode(pEvent.Label, "full")
     Set arrow = pEvent.Arrow
-    Set inv   = pEvent.Invocation
+    ; NOTE: Event.Invocation may be MultiDimensional on some builds; do not treat as scalar.
     If (src="")!(dst="") {
         Quit tSC
     }
 
-    Set pFrag = src_"|"_arrow_"|"_dst_"|"_lbl_"|"_inv_"|"_evType
+    Set pFrag = src_"|"_arrow_"|"_dst_"|"_lbl_"|"_evType
     Quit tSC
 }
 
@@ -728,57 +718,252 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
     }
 
     Set len = pEvents.%Size()
-    Set i = 0
 
-    While (i<len) {
+    ; ----------------------------
+    ; Episode grouping v2 (T7)
+    ; ----------------------------
+    ; Goal:
+    ; - Fix “envelope wrapper” sessions where the first request (often *.Services -> *.Process)
+    ;   stays open until the very end, which causes the v1 algorithm to build one giant episode.
+    ; - Use a stack/depth approach for INPROC (->>) calls.
+    ; - Emit episodes at depth=1 normally, or depth=2 when an envelope wrapper is detected.
+    ; - Treat ST-004 Loop events as atomic (do not affect nesting depth).
+    ; - Do NOT start new top-level episodes for nested calls; nested events stay inside the current episode.
+
+    ; Determine target depth for starting episodes (1 normally, 2 for envelope sessions)
+    Set tTargetDepth = 1
+
+    ; Find first non-trace business request
+    Set tFirstReqId = 0
+    Set tFirstReqIdx = -1
+    Set tFirstReqSrc = ""
+    Set tFirstReqDst = ""
+    Set tFirstReqLabel = ""
+
+    For i=0:1:len-1 {
+        Set e = pEvents.%Get(i)
+        Continue:'$IsObject(e)
+        If ..IsTraceEvent(e) {
+            Continue
+        }
+        If $ZCONVERT(e.EventType,"U")="REQUEST" {
+            Set tFirstReqId = +e.ID
+            Set tFirstReqIdx = i
+            Set tFirstReqSrc = e.Src
+            Set tFirstReqDst = e.Dst
+            Set tFirstReqLabel = e.Label
+            Quit
+        }
+    }
+
+    If tFirstReqId>0 {
+        ; Heuristic: envelope wrappers are typically inbound XML messages into a top BP:
+        ; - Label HS.Message.XMLMessage
+        ; - Src ends with/contains ".Services"
+        ; - Dst ends with/contains ".Process"
+        Set tLooksLikeEnvelope = 0
+        Set tLabelU = $ZCONVERT(tFirstReqLabel,"U")
+        Set tSrcU   = $ZCONVERT(tFirstReqSrc,"U")
+        Set tDstU   = $ZCONVERT(tFirstReqDst,"U")
+
+        If tLabelU="HS.MESSAGE.XMLMESSAGE" {
+            Set tLooksLikeEnvelope = 1
+        }
+        If (tSrcU[".SERVICES")&(tDstU[".PROCESS") {
+            Set tLooksLikeEnvelope = 1
+        }
+
+        ; Find the matching response for the first request (by PairWithID, with endpoint fallback)
+        Set tFirstRespIdx = -1
+        For i=tFirstReqIdx+1:1:len-1 {
+            Set e = pEvents.%Get(i)
+            Continue:'$IsObject(e)
+            Continue:..IsTraceEvent(e)
+            Continue:$ZCONVERT(e.EventType,"U")'="RESPONSE"
+
+            If (+e.PairWithID=tFirstReqId) {
+                Set tFirstRespIdx = i
+                Quit
+            }
+
+            If (e.Src=tFirstReqDst)&(e.Dst=tFirstReqSrc) {
+                Set tFirstRespIdx = i
+                Quit
+            }
+        }
+
+        ; Only treat as envelope when:
+        ; - It looks like an envelope
+        ; - The response is near the end
+        ; - There is at least one other business request nested inside it
+        If (tLooksLikeEnvelope=1)&(tFirstRespIdx>0) {
+            Set tHasInnerReq = 0
+            For i=tFirstReqIdx+1:1:tFirstRespIdx-1 {
+                Set e = pEvents.%Get(i)
+                Continue:'$IsObject(e)
+                Continue:..IsTraceEvent(e)
+                If $ZCONVERT(e.EventType,"U")="REQUEST" {
+                    Set tHasInnerReq = 1
+                    Quit
+                }
+            }
+
+            ; “Near end” heuristic: response is in the last 3 events
+            If tHasInnerReq, (tFirstRespIdx>(len-3)) {
+                Set tTargetDepth = 2
+            }
+        }
+    }
+
+    ; Stack for inproc calls only (depth counts open inproc requests)
+    Set tDepth = 0
+    Kill tReqId, tReqSrc, tReqDst
+
+    ; Current open episode (at tTargetDepth)
+    Set tCurrentEp = ""
+    Set tCurrentRootReqId = 0
+
+    For i=0:1:len-1 {
         Set ev = pEvents.%Get(i)
-        Set i = i + 1
         Continue:'$IsObject(ev)
 
         Set evType = $ZCONVERT(ev.EventType,"U")
         Set isTrace = ..IsTraceEvent(ev)
 
-        ; Only Requests for business events can start multi-event episodes
-        If 'isTrace, evType="REQUEST" {
-            Set ep = ##class(MALIB.Util.DiagramTool.Episode).%New()
-            Set ep.Events = ##class(%DynamicArray).%New()
-            Set ep.Compressible = 1
-            Set ep.RootSrc = ev.Src
-            Set ep.RootDst = ev.Dst
+        ; Treat ST-004 loop events as atomic (no depth changes)
+        If evType="LOOP" {
+            If $IsObject(tCurrentEp) {
+                Do tCurrentEp.Events.%Push(ev)
+            } Else {
+                Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                Set epSingle.Events = ##class(%DynamicArray).%New()
+                Set epSingle.Compressible = 0
+                Do epSingle.Events.%Push(ev)
+                Do pEpisodes.%Push(epSingle)
+            }
+            Continue
+        }
 
-            Do pEpisodes.%Push(ep)
+        ; TRACE/LOG events: keep them inside the current episode when possible
+        If isTrace {
+            If $IsObject(tCurrentEp) {
+                Do tCurrentEp.Events.%Push(ev)
+            } Else {
+                Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                Set epSingle.Events = ##class(%DynamicArray).%New()
+                Set epSingle.Compressible = 0
+                Do epSingle.Events.%Push(ev)
+                Do pEpisodes.%Push(epSingle)
+            }
+            Continue
+        }
 
-            Set evArr = ep.Events
-            Do evArr.%Push(ev)
+        ; Business Request
+        If evType="REQUEST" {
+            ; Determine inproc using arrow semantics only.
+            ; (Invocation may be MultiDimensional on some builds.)
+            Set isInproc = (ev.Arrow="->>")
 
-            ; Consume subsequent events until we see a terminal response back to the root
-            For {
-                Quit:(i>=len)
-                Set nextEv = pEvents.%Get(i)
-                Set i = i + 1
-                Quit:'$IsObject(nextEv)
+            ; Inproc requests affect depth and participate in stack grouping
+            If isInproc {
+                Set callLevel = tDepth + 1
 
-                Do evArr.%Push(nextEv)
+                ; Start a new episode only at the target depth
+                If callLevel=tTargetDepth {
+                    Set ep = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                    Set ep.Events = ##class(%DynamicArray).%New()
+                    Set ep.Compressible = 1
+                    Set ep.RootSrc = ev.Src
+                    Set ep.RootDst = ev.Dst
 
-                Set nType = $ZCONVERT(nextEv.EventType,"U")
-                Set rootSrc = ep.RootSrc
-                Set rootDst = ep.RootDst
+                    Do ep.Events.%Push(ev)
+                    Do pEpisodes.%Push(ep)
 
-                ; Episode terminates when a Response returns from RootDst back to RootSrc
-                If (nType="RESPONSE"), (rootSrc'=""), (rootDst'=""), (nextEv.Src=rootDst), (nextEv.Dst=rootSrc) {
-                    Quit
+                    Set tCurrentEp = ep
+                    Set tCurrentRootReqId = +ev.ID
+                } ElseIf $IsObject(tCurrentEp) {
+                    Do tCurrentEp.Events.%Push(ev)
+                } Else {
+                    ; Outside target depth: keep as single-event, non-compressible episode
+                    Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                    Set epSingle.Events = ##class(%DynamicArray).%New()
+                    Set epSingle.Compressible = 0
+                    Do epSingle.Events.%Push(ev)
+                    Do pEpisodes.%Push(epSingle)
+                }
+
+                ; Push on the inproc request stack
+                Set tDepth = tDepth + 1
+                Set tReqId(tDepth)  = +ev.ID
+                Set tReqSrc(tDepth) = ev.Src
+                Set tReqDst(tDepth) = ev.Dst
+                Continue
+            }
+
+            ; Non-inproc requests (e.g., QUEUE) do not affect stack depth.
+            ; Keep them inside the current episode when possible.
+            If $IsObject(tCurrentEp) {
+                Do tCurrentEp.Events.%Push(ev)
+            } Else {
+                Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                Set epSingle.Events = ##class(%DynamicArray).%New()
+                Set epSingle.Compressible = 0
+                Do epSingle.Events.%Push(ev)
+                Do pEpisodes.%Push(epSingle)
+            }
+            Continue
+        }
+
+        ; Business Response
+        If evType="RESPONSE" {
+            ; Attach response to current episode when possible
+            If $IsObject(tCurrentEp) {
+                Do tCurrentEp.Events.%Push(ev)
+            } Else {
+                Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                Set epSingle.Events = ##class(%DynamicArray).%New()
+                Set epSingle.Compressible = 0
+                Do epSingle.Events.%Push(ev)
+                Do pEpisodes.%Push(epSingle)
+            }
+
+            ; Determine inproc using arrow semantics only.
+            ; (Invocation may be MultiDimensional on some builds.)
+            Set isInproc = (ev.Arrow="->>")
+
+            ; Pop the inproc stack when the response matches the current top frame
+            If isInproc, (tDepth>0) {
+                Set topReqId = +$Get(tReqId(tDepth))
+                Set topSrc = $Get(tReqSrc(tDepth))
+                Set topDst = $Get(tReqDst(tDepth))
+
+                Set match = 0
+                If (+ev.PairWithID>0), (+ev.PairWithID=topReqId) {
+                    Set match = 1
+                } ElseIf (ev.Src=topDst)&(ev.Dst=topSrc) {
+                    Set match = 1
+                }
+
+                If match {
+                    Kill tReqId(tDepth), tReqSrc(tDepth), tReqDst(tDepth)
+                    Set tDepth = tDepth - 1
+
+                    ; If we just closed the root request for the current episode, close the episode
+                    If $IsObject(tCurrentEp), (topReqId=tCurrentRootReqId) {
+                        Set tCurrentEp = ""
+                        Set tCurrentRootReqId = 0
+                    }
                 }
             }
 
             Continue
         }
 
-        ; Non-request or trace-only events become single-event, non-compressible episodes
+        ; Anything else: degrade to single-event episode to preserve order
         Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
         Set epSingle.Events = ##class(%DynamicArray).%New()
         Set epSingle.Compressible = 0
-        Set arr = epSingle.Events
-        Do arr.%Push(ev)
+        Do epSingle.Events.%Push(ev)
         Do pEpisodes.%Push(epSingle)
     }
 
@@ -797,7 +982,6 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
 
     Set len = pEpisodes.%Size()
     Set i = 0
-    Set ^ClineDebug3 = "CompressEpisodesToBlocks: len="_len_"; "
 
     While (i<len) {
         Set ep = pEpisodes.%Get(i)
@@ -807,7 +991,6 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
         }
 
         Set clsEp = $ClassName(ep)
-        Set ^ClineDebug3 = $Get(^ClineDebug3)_"i="_i_", clsEp="_clsEp_"; "
 
         ; Defensive: only operate on concrete Episode instances; skip anything else
         If clsEp'="MALIB.Util.DiagramTool.Episode" {
@@ -837,7 +1020,6 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
             Set epNext = pEpisodes.%Get(j)
             Quit:'$IsObject(epNext)
             Set clsEpNext = $ClassName(epNext)
-            Set ^ClineDebug3 = $Get(^ClineDebug3)_"j="_j_", clsEpNext="_clsEpNext_"; "
             If clsEpNext'="MALIB.Util.DiagramTool.Episode" {
                 Quit
             }
@@ -872,213 +1054,6 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
     }
 
     Quit tSC
-}
-
-/// ST-008 debug helper — Reproduce ST-008 loop compression scenario and log episode types
-ClassMethod DebugST008EpisodeCompression() As %Status
-{
-    Set tSC = $$$OK
-    Set ^ClineDebug3 = "DebugST008EpisodeCompression; "
-
-    // Recreate the rows for TestST008EpisodeLoopCompressionContiguousAndMixed
-    Set rows = ##class(%DynamicArray).%New()
-    Set sess = 9108003
-
-    // Episode A (business structure 1) - repeated twice contiguously
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8301)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "A")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedReqA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8302)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "C")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerReqA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8303)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "C")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8302)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerRespA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8304)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "A")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8301)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedRespA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8401)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "A")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedReqA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8402)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "C")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerReqA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8403)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "C")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8402)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerRespA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8404)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "A")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8401)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedRespA")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    // Episode B (different business structure: different label)
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8501)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "A")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedReqB")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8502)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Request")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "C")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", "")
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerReqB")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8503)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "C")
-    Do row.%Set("TargetConfigName", "B")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8502)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedInnerRespB")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    Set row = ##class(%DynamicObject).%New()
-    Do row.%Set("ID", 8504)
-    Do row.%Set("Invocation", "Inproc")
-    Do row.%Set("Type", "Response")
-    Do row.%Set("SourceConfigName", "B")
-    Do row.%Set("TargetConfigName", "A")
-    Do row.%Set("ReturnQueueName", "")
-    Do row.%Set("CorrespondingMessageId", 8501)
-    Do row.%Set("MessageBodyClassName", "Unit.Test.ST008.LoopedRespB")
-    Do row.%Set("SessionId", sess)
-    Do rows.%Push(row)
-
-    // Run the same pipeline that BuildDiagramForSession uses
-    Set evDyn = ""
-    Set tSC = ##class(MALIB.Util.DiagramTool.Correlation).CorrelateEvents(rows, .evDyn)
-    If $$$ISERR(tSC) Quit tSC
-
-    Set evTyped = ""
-    Set tSC = ..ConvertDynamicToEvents(evDyn, .evTyped)
-    If $$$ISERR(tSC) Quit tSC
-
-    Set tLooped = ""
-    Set tSC = ..ApplyLoopCompression(evTyped, .tLooped)
-    If $$$ISERR(tSC) Quit tSC
-
-    Set episodes = ""
-    Set tSC = ..BuildEpisodes(tLooped, .episodes)
-    If $$$ISERR(tSC) Quit tSC
-
-    Set tSC = ..ComputeEpisodeSignatures(episodes)
-    If $$$ISERR(tSC) Quit tSC
-
-    // Log episode classes and signatures
-    If $IsObject(episodes) {
-        Set len = episodes.%Size()
-        Set ^ClineDebug3 = ^ClineDebug3_"episodesLen="_len_"; "
-        For i=0:1:len-1 {
-            Set ep = episodes.%Get(i)
-            Continue:'$IsObject(ep)
-            Set evArr = ..GetEpisodeEvents(ep)
-            Set sig = ..GetEpisodeSignature(ep)
-            Set comp = ..GetEpisodeCompressible(ep)
-            Set evCount = $Select($IsObject(evArr):evArr.%Size(),1:0)
-            Set ^ClineDebug3 = ^ClineDebug3_"ep#"_i_": cls="_$ClassName(ep)_" sig="_sig_" comp="_comp_" evCount="_evCount_"; "
-        }
-    } Else {
-        Set ^ClineDebug3 = ^ClineDebug3_"episodes is not object; "
-    }
-
-    // Attempt compression but catch any error so we can inspect debug
-    Try {
-        Set blocks = ""
-        Set tSC = ..CompressEpisodesToBlocks(episodes, .blocks)
-        If $$$ISERR(tSC) {
-            Set ^ClineDebug3 = ^ClineDebug3_"CompressStatus="_$SYSTEM.Status.GetErrorText(tSC)_"; "
-        }
-    } Catch ex {
-        Set ^ClineDebug3 = ^ClineDebug3_"EX="_ex.DisplayString()
-    }
-
-    Quit $$$OK
 }
 
 /// ST-008 helper — Emit episode blocks (episodes and episode-level loops)
