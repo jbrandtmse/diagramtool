@@ -28,6 +28,10 @@ ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %Dynam
     Set tID="", tInvocation="", tBody="", tSess=0, tSource="", tTarget="", tRet="", tCorr="", tTime="", tType=""
 
     ; Prepare cursors for both primary and fallback ordering
+    ; NOTE: the trace filter must be NULL-safe. Bodyless headers (empty acks,
+    ; error responses, SendResponse with no body object) have a NULL
+    ; MessageBodyClassName, and "NULL <> 'x'" is not true in SQL three-valued
+    ; logic — a bare "<>" filter would silently drop those rows from every diagram.
     &sql(DECLARE C1 CURSOR FOR
         SELECT
           ID, Invocation, MessageBodyClassName, SessionId,
@@ -36,7 +40,7 @@ ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %Dynam
           TimeCreated, Type
         FROM Ens.MessageHeader
         WHERE SessionId = :pSessionId
-          AND MessageBodyClassName <> 'HS.Util.Trace.Request'
+          AND (MessageBodyClassName IS NULL OR MessageBodyClassName <> 'HS.Util.Trace.Request')
         ORDER BY TimeCreated, ID)
     &sql(DECLARE C2 CURSOR FOR
         SELECT
@@ -46,7 +50,7 @@ ClassMethod LoadHeadersForSession(pSessionId As %Integer, Output pRows As %Dynam
           TimeCreated, Type
         FROM Ens.MessageHeader
         WHERE SessionId = :pSessionId
-          AND MessageBodyClassName <> 'HS.Util.Trace.Request'
+          AND (MessageBodyClassName IS NULL OR MessageBodyClassName <> 'HS.Util.Trace.Request')
         ORDER BY ID)
     Set tCur = ""
     If 'pForceIdOnlyOrder {

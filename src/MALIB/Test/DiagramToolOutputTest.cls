@@ -896,6 +896,32 @@ Method TestST005ParticipantSanitization() As %Status
     Quit $$$OK
 }
 
+/// ST-003/ST-005 regression: bodyless responses (empty MessageBodyClassName, e.g.
+/// error acks) still pair with their requests via CorrMsgId and render with a
+/// "(no body)" placeholder label instead of vanishing from the diagram.
+Method TestST005BodylessResponsePairsAndRenders() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9105021
+
+    Do ..PushRow(rows, ..NewRow(9501, "Queue", "Request",  "R1", "R2", "RQ", "", "Unit.Test.ST005.BodylessReq", sess))
+    Do ..PushRow(rows, ..NewRow(9502, "Queue", "Response", "R2", "R1", "", 9501, "", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.005 bodyless BuildDiagramForSession OK")
+
+    ; The pair is correlated: no unpaired warnings for either leg
+    Do $$$AssertTrue('(diag["Unpaired queued request"), "st.005 bodyless request paired (no warning)")
+    Do $$$AssertTrue('(diag["Unpaired queued response"), "st.005 bodyless response paired (no warning)")
+
+    ; Both legs render; the bodyless response uses the placeholder label
+    Do $$$AssertTrue(diag["R1 -->> R2 : Unit.Test.ST005.BodylessReq", "st.005 bodyless request line present")
+    Do $$$AssertTrue(diag["R2 -->> R1 : (no body)", "st.005 bodyless response line present with placeholder label")
+
+    Quit $$$OK
+}
+
 /// ST-005 regression: AppendDiagramsToFile must actually persist appended content
 /// (requires %Save on the linked file stream; Flush alone discards everything).
 Method TestST005AppendDiagramsToFilePersists() As %Status

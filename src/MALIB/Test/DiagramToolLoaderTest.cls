@@ -35,6 +35,15 @@ Method InsertHeader(pSessionId As %Integer, pTime As %String, pBody As %String =
     Quit +$Get(tID,0)
 }
 
+/// Helper: insert a header row with NO MessageBodyClassName (NULL body) and return its ID
+Method InsertBodylessHeader(pSessionId As %Integer, pTime As %String) As %Integer
+{
+    Set tID = ""
+    &sql(INSERT INTO Ens.MessageHeader (SessionId, TimeCreated) VALUES (:pSessionId, :pTime))
+    &sql(SELECT MAX(ID) INTO :tID FROM Ens.MessageHeader WHERE SessionId = :pSessionId AND TimeCreated = :pTime AND MessageBodyClassName IS NULL)
+    Quit +$Get(tID,0)
+}
+
 /// Helper: cleanup all rows for a session
 Method CleanupSession(pSessionId As %Integer) As %Status
 {
@@ -228,6 +237,35 @@ Method TestST002LargeTieBreakByID() As %Status
     }
 
     Do $$$AssertEquals(..JoinIdsFromRows(rows), sExp, "IDs ascending when TimeCreated identical")
+
+    Do ..CleanupSession(sid)
+    Quit $$$OK
+}
+
+/// ST-002 regression: rows with a NULL MessageBodyClassName (bodyless acks and
+/// error responses) must NOT be dropped by the trace-exclusion filter
+/// (SQL three-valued logic: NULL <> 'x' is not true).
+Method TestST002BodylessRowsNotFiltered() As %Status
+{
+    Set sid = 9000015
+    Do ..CleanupSession(sid)
+
+    Set id1 = ..InsertHeader(sid, "2024-01-01 10:00:00", "Unit.Test.Body.A")
+    Set id2 = ..InsertBodylessHeader(sid, "2024-01-01 10:00:01")
+    Set idx = ..InsertHeader(sid, "2024-01-01 10:00:02", "HS.Util.Trace.Request")
+
+    Do $$$AssertTrue(id2>0, "Bodyless row inserted")
+
+    Set rows = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool).LoadHeadersForSession(sid, .rows)
+    Do $$$AssertStatusOK(tSC, "Load OK with bodyless row present")
+    Do $$$AssertEquals($Select($IsObject(rows):rows.%Size(),1:0), 2, "Bodyless row loaded; trace row still filtered")
+    Do $$$AssertEquals(..JoinIdsFromRows(rows), id1_","_id2, "Bodyless row present in order")
+
+    ; Bodyless MessageBodyClassName normalizes to empty string
+    Set obj = rows.%Get(1)
+    Do $$$AssertTrue($IsObject(obj), "Bodyless row object present")
+    Do $$$AssertEquals(obj.%Get("MessageBodyClassName"), "", "NULL body class normalized to empty string")
 
     Do ..CleanupSession(sid)
     Quit $$$OK

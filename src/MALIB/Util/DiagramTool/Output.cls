@@ -452,6 +452,18 @@ ClassMethod LabelForEvent(pEvent As %DynamicObject, pLabelMode As %String = "ful
     Quit ..NormalizeLabelForMode($Select($IsObject(pEvent):pEvent.%Get("Label"), 1:""), pLabelMode)
 }
 
+/// Shared helper — label text for an arrow line. Bodyless messages (NULL
+/// MessageBodyClassName, e.g. empty acks or error responses) get a "(no body)"
+/// placeholder so the arrow still carries readable message text in Mermaid.
+ClassMethod DisplayLabel(pText As %String, pLabelMode As %String = "full") As %String
+{
+    Set label = ..NormalizeLabelForMode(pText, pLabelMode)
+    If label="" {
+        Quit "(no body)"
+    }
+    Quit label
+}
+
 /// Shared helper — apply labelMode to arbitrary label text
 ClassMethod NormalizeLabelForMode(pText As %String, pLabelMode As %String = "full") As %String
 {
@@ -515,6 +527,11 @@ ClassMethod EmitEventLine(ByRef pLines As %String, pEvent As MALIB.Util.DiagramT
         Quit tSC
     }
 
+    ; Bodyless messages still render with a readable placeholder label
+    If label="" {
+        Set label = "(no body)"
+    }
+
     Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,src)_" "_arrow_" "_..PartId(.pPartMap,dst)_" : "_label
     Quit tSC
 }
@@ -534,12 +551,12 @@ ClassMethod EmitLoopAsPlain(ByRef pLines As %String, pLoopEvent As MALIB.Util.Di
     ; Treat as a single pair: emit request then response lines without loop
     Set reqSrc   = pLoopEvent.ReqSrc
     Set reqDst   = pLoopEvent.ReqDst
-    Set reqLbl   = ..NormalizeLabelForMode(pLoopEvent.ReqLabel, pLabelMode)
+    Set reqLbl   = ..DisplayLabel(pLoopEvent.ReqLabel, pLabelMode)
     Set reqArrow = pLoopEvent.ReqArrow
 
     Set respSrc   = pLoopEvent.RespSrc
     Set respDst   = pLoopEvent.RespDst
-    Set respLbl   = ..NormalizeLabelForMode(pLoopEvent.RespLabel, pLabelMode)
+    Set respLbl   = ..DisplayLabel(pLoopEvent.RespLabel, pLabelMode)
     Set respArrow = pLoopEvent.RespArrow
 
     If (reqSrc'="")&&(reqDst'="") {
@@ -565,12 +582,12 @@ ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util
 
     Set reqSrc   = pLoopEvent.ReqSrc
     Set reqDst   = pLoopEvent.ReqDst
-    Set reqLbl   = ..NormalizeLabelForMode(pLoopEvent.ReqLabel, pLabelMode)
+    Set reqLbl   = ..DisplayLabel(pLoopEvent.ReqLabel, pLabelMode)
     Set reqArrow = pLoopEvent.ReqArrow
 
     Set respSrc   = pLoopEvent.RespSrc
     Set respDst   = pLoopEvent.RespDst
-    Set respLbl   = ..NormalizeLabelForMode(pLoopEvent.RespLabel, pLabelMode)
+    Set respLbl   = ..DisplayLabel(pLoopEvent.RespLabel, pLabelMode)
     Set respArrow = pLoopEvent.RespArrow
 
     If (reqSrc'="")&&(reqDst'="") {
