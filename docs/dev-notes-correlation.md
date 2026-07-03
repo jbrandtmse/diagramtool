@@ -10,7 +10,9 @@ Purpose
 
 Policy Decisions (Chosen)
 - Queue fallback requires reversed endpoints match on ReturnQueueName; otherwise treat as unpaired with warning.
-- Unpaired Inproc responses are emitted as standalone Response events with a warning.
+- Unpaired responses (Inproc AND Queue) are emitted as standalone Response events with a warning — message rows are never silently dropped from the diagram. Queued standalone responses keep the async arrow (-->>).
+- Invocation is honored strictly per the PRD: a Queue request correlated via CorrespondingMessageId renders -->> on both legs even when ReturnQueueName is empty (no reclassification heuristics).
+- Type normalization (string, numeric enum, or CorrMsgId-inferred) applies uniformly — to the outer event scan and to the forward response-search scans.
 
 Dependencies and Inputs
 - Requires deterministic, ordered rows from ST-002:

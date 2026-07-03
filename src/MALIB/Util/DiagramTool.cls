@@ -115,14 +115,24 @@ ClassMethod GenerateDiagrams(pSelector As %String, pOutFile As %String = "", pLa
                 If key="" {
                     Set key = diag
                 }
+                ; Keep every distinct key per hash bucket so a CRC collision can
+                ; never evict a previously seen key (keys are stored as node
+                ; values, not subscripts, to avoid subscript length limits)
                 Set h = $ZCRC(key,4)
-                If $Data(tSeen(h)) {
-                    ; Potential hash collision - only treat as duplicate when normalized text is identical
-                    If tSeen(h)=key {
-                        Continue
+                Set dup = 0
+                Set ix = ""
+                For {
+                    Set ix = $Order(tSeen(h,ix),1,val)
+                    Quit:ix=""
+                    If val=key {
+                        Set dup = 1
+                        Quit
                     }
                 }
-                Set tSeen(h) = key
+                If dup {
+                    Continue
+                }
+                Set tSeen(h,$Increment(tSeen(h))) = key
             }
             Set tOutIndex = tOutIndex + 1
             Set tOutDiag(tOutIndex) = diag
@@ -183,7 +193,7 @@ ClassMethod AppendDiagramsToFile(pOutFile As %String, ByRef pDiagMap) As %Status
 ClassMethod DiagramDedupKey(pDiagram As %String) As %String
 {
     Set key = $Get(pDiagram,"")
-    Quit:key=""
+    Quit:key="" ""
 
     Set prefix = "%% Session "
     Set pos = $Find(key, prefix)

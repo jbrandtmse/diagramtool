@@ -11,9 +11,9 @@
 * ================================================================================================================
 */
 
-Include HS.HC
+Include %occInclude
 
-Class MALIB.Util.ClineDebug Extends %RegisteredObject
+Class MALIB.Util.DiagramTool.ClineDebug Extends %RegisteredObject
 {
 
 /// <p>
@@ -31,11 +31,11 @@ Class MALIB.Util.ClineDebug Extends %RegisteredObject
 /// Usage:
 /// <ul>
 ///   <li>Class-level:
-///       <code>Do ##class(MALIB.Util.ClineDebug).SetDebug(1)</code>,
-///       <code>Do ##class(MALIB.Util.ClineDebug).Trace("msg; ")</code>,
-///       <code>Do ##class(MALIB.Util.ClineDebug).ClearDebug()</code></li>
+///       <code>Do ##class(MALIB.Util.DiagramTool.ClineDebug).SetDebug(1)</code>,
+///       <code>Do ##class(MALIB.Util.DiagramTool.ClineDebug).Trace("msg; ")</code>,
+///       <code>Do ##class(MALIB.Util.DiagramTool.ClineDebug).ClearDebug()</code></li>
 ///   <li>Instance-level (from any instance method in a subclass that
-///       <code>Extends MALIB.Util.ClineDebug</code>):
+///       <code>Extends MALIB.Util.DiagramTool.ClineDebug</code>):
 ///       <code>Do ..Trace("msg; ")</code> — this uses relative dot syntax to invoke the
 ///       inherited <code>ClassMethod Trace()</code> directly; there is no separate
 ///       instance <code>Method Trace()</code> on this base class.</li>

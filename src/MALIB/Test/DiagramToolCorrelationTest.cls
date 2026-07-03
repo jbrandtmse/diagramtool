@@ -188,7 +188,8 @@ Method TestAC07QueuedUnpairedWarning() As %Status
     Quit $$$OK
 }
 
-/// AC-07: Queued - mismatched CorrMsgId must NOT fallback even if RQN matches and endpoints reversed
+/// AC-07: Queued - mismatched CorrMsgId must NOT fallback even if RQN matches and endpoints reversed.
+/// The unpaired response is still emitted standalone with a warning (never silently dropped).
 Method TestAC07QueuedNoFallbackWhenCorrMsgIdMismatched() As %Status
 {
     Set rows = ..NewRowsArray()
@@ -200,7 +201,12 @@ Method TestAC07QueuedNoFallbackWhenCorrMsgIdMismatched() As %Status
     Set req = ..FindEventByID(events, 300, "Request")
     Do $$$AssertTrue($IsObject(req), "Request found")
     Set resp = ..FindEventByID(events, 301, "Response")
-    Do $$$AssertTrue('$IsObject(resp), "Mismatched CorrMsgId should not pair and response not emitted")
+    Do $$$AssertTrue($IsObject(resp), "Mismatched CorrMsgId does not pair but response is still emitted")
+    Do $$$AssertEquals(resp.%Get("PairWithID"), "", "Unpaired response has no PairWithID")
+    Do $$$AssertEquals(resp.%Get("Arrow"), "-->>", "Unpaired queued response keeps async arrow")
+    Set respNotes = ""
+    If resp.%IsDefined("Notes") Set respNotes = resp.%Get("Notes")
+    Do $$$AssertTrue(respNotes["Unpaired queued response", "Unpaired queued response warning present")
     Set notes = ""
     If req.%IsDefined("Notes") Set notes = req.%Get("Notes")
     Do $$$AssertTrue(notes["Unpaired queued request", "Request noted unpaired queued warning")
@@ -227,7 +233,8 @@ Method TestAC06InprocTwoRequestsOutOfOrderResponses() As %Status
     Quit $$$OK
 }
 
-/// AC-07: Queued fallback requires reversed endpoints even if RQN matches
+/// AC-07: Queued fallback requires reversed endpoints even if RQN matches.
+/// The unpaired response is still emitted standalone with a warning (never silently dropped).
 Method TestAC07QueuedFallbackRequiresReversedEndpoints() As %Status
 {
     Set rows = ..NewRowsArray()
@@ -239,10 +246,56 @@ Method TestAC07QueuedFallbackRequiresReversedEndpoints() As %Status
     Set req = ..FindEventByID(events, 500, "Request")
     Do $$$AssertTrue($IsObject(req), "Request found")
     Set resp = ..FindEventByID(events, 501, "Response")
-    Do $$$AssertTrue('$IsObject(resp), "Fallback requires reversed endpoints; no response emitted")
+    Do $$$AssertTrue($IsObject(resp), "Fallback requires reversed endpoints; response emitted standalone")
+    Do $$$AssertEquals(resp.%Get("PairWithID"), "", "Unpaired response has no PairWithID")
+    Set respNotes = ""
+    If resp.%IsDefined("Notes") Set respNotes = resp.%Get("Notes")
+    Do $$$AssertTrue(respNotes["Unpaired queued response", "Unpaired queued response warning present")
     Set notes = ""
     If req.%IsDefined("Notes") Set notes = req.%Get("Notes")
     Do $$$AssertTrue(notes["Unpaired queued request", "Unpaired queued warning present")
+    Quit $$$OK
+}
+
+/// AC-07 regression: a genuine queued pair correlated by CorrMsgId must keep async
+/// arrows (-->>) on both legs even when the request has no ReturnQueueName.
+/// (Previously an undocumented heuristic silently reclassified these as Inproc.)
+Method TestAC07QueuedCorrMsgIdKeepsAsyncArrowsWithoutRQN() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Do ..PushRow(rows, ..NewRow(600, "Queue", "Request", "A", "B", "", ""))
+    Do ..PushRow(rows, ..NewRow(601, "Queue", "Response", "B", "A", "", 600))
+    Set events = ""
+    Set tSC = ..Correlate(rows, .events)
+    Do $$$AssertStatusOK(tSC, "CorrelateEvents OK")
+    Set req = ..FindEventByID(events, 600, "Request")
+    Set resp = ..FindEventByID(events, 601, "Response")
+    Do $$$AssertTrue($IsObject(req), "Request found")
+    Do $$$AssertTrue($IsObject(resp), "Response found")
+    Do $$$AssertEquals(req.%Get("Arrow"), "-->>", "Queued request arrow stays async without RQN")
+    Do $$$AssertEquals(resp.%Get("Arrow"), "-->>", "Queued response arrow stays async without RQN")
+    Do $$$AssertEquals(resp.%Get("PairWithID"), 600, "Paired by CorrMsgId")
+    Quit $$$OK
+}
+
+/// Regression: rows carrying numeric enum Type values (1=Request, 2=Response) must
+/// pair exactly like their string-typed equivalents (normalization applies to the
+/// forward response scans, not just the outer event loop).
+Method TestNumericEnumTypeValuesPair() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Do ..PushRow(rows, ..NewRow(700, "Inproc", 1, "A", "B"))
+    Do ..PushRow(rows, ..NewRow(701, "Inproc", 2, "B", "A", "", 700))
+    Set events = ""
+    Set tSC = ..Correlate(rows, .events)
+    Do $$$AssertStatusOK(tSC, "CorrelateEvents OK")
+    Do $$$AssertEquals($Select($IsObject(events):events.%Size(), 1:0), 2, "Two events emitted")
+    Set resp = ..FindEventByID(events, 701, "Response")
+    Do $$$AssertTrue($IsObject(resp), "Response event found")
+    Do $$$AssertEquals(resp.%Get("PairWithID"), 700, "Numeric-typed rows pair correctly")
+    Set respNotes = ""
+    If resp.%IsDefined("Notes") Set respNotes = resp.%Get("Notes")
+    Do $$$AssertTrue('(respNotes["Unpaired"), "No spurious unpaired warning for numeric-typed rows")
     Quit $$$OK
 }
 

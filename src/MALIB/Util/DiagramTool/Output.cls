@@ -38,6 +38,10 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
         Quit tSC
     }
 
+    ; Backfill missing endpoints from the original rows so that participant
+    ; collection, signatures, and emission all see the same endpoint values
+    Do ..BackfillEndpointsFromRows(tEvents, pRows)
+
     ; Apply loop detection/compression (ST-004) over typed events
     Set tLooped = ""
     Set tSC = ..ApplyLoopCompression(tEvents, .tLooped)
@@ -92,13 +96,29 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
         }
     }
 
-    ; Emit participants in order-of-first-appearance (per session)
+    ; ST-005: Build Mermaid-safe participant identifiers (order-of-first-appearance
+    ; preserved; original names kept as labels; collisions get _2/_3 suffixes)
+    Kill tPartMap, tIdUsed
     If $IsObject(tPartList) {
         Set lenParts = tPartList.%Size()
         For i=0:1:lenParts-1 {
             Set name = tPartList.%Get(i)
             Continue:name=""
-            Set lines = lines_$Char(13,10)_"participant "_name
+            Set id = ..SanitizeParticipantId(name)
+            If $Data(tIdUsed(id)) {
+                Set n = 2
+                While $Data(tIdUsed(id_"_"_n)) {
+                    Set n = n + 1
+                }
+                Set id = id_"_"_n
+            }
+            Set tIdUsed(id) = 1
+            Set tPartMap(name) = id
+            If id=name {
+                Set lines = lines_$Char(13,10)_"participant "_id
+            } Else {
+                Set lines = lines_$Char(13,10)_"participant "_id_" as "_name
+            }
         }
     }
 
@@ -114,20 +134,76 @@ ClassMethod BuildDiagramForSession(pSessionId As %Integer, pRows As %DynamicArra
         For i=0:1:len-1 {
             Set ev = tLooped.%Get(i)
             Continue:'$IsObject(ev)
-            Do ..EmitEventOrLoop(.lines, ev, pRows, pLabelMode, 0)
+            Do ..EmitEventOrLoop(.lines, ev, pRows, pLabelMode, 0, .tPartMap)
         }
 
         Set pDiagram = lines
         Quit tSC
     }
 
-    Set tSC = ..EmitEpisodeBlocks(.lines, tBlocks, pRows, pLabelMode)
+    Set tSC = ..EmitEpisodeBlocks(.lines, tBlocks, pRows, pLabelMode, .tPartMap)
     If $$$ISERR(tSC) {
         Quit tSC
     }
 
     Set pDiagram = lines
     Quit tSC
+}
+
+/// ST-005 helper — Fill missing event endpoints from the original header rows (by ID)
+ClassMethod BackfillEndpointsFromRows(pEvents As %DynamicArray, pRows As %DynamicArray) As %Status
+{
+    Set tSC = $$$OK
+    Quit:'$IsObject(pEvents) tSC
+    Quit:'$IsObject(pRows) tSC
+
+    Set len = pEvents.%Size()
+    For i=0:1:len-1 {
+        Set ev = pEvents.%Get(i)
+        Continue:'$IsObject(ev)
+        Continue:$ZCONVERT(ev.EventType,"U")="LOOP"
+        Continue:(ev.Src'="")&&(ev.Dst'="")
+
+        Set evId = +ev.ID
+        For k=0:1:pRows.%Size()-1 {
+            Set row = pRows.%Get(k)
+            Continue:'$IsObject(row)
+            If +row.%Get("ID")=evId {
+                If ev.Src="" Set ev.Src = row.%Get("SourceConfigName")
+                If ev.Dst="" Set ev.Dst = row.%Get("TargetConfigName")
+                Quit
+            }
+        }
+    }
+    Quit tSC
+}
+
+/// ST-005 helper — Sanitize a participant name into a Mermaid-safe identifier.
+/// Keeps alphanumerics, "_" and "."; everything else becomes "_". Original names
+/// are preserved as display labels via "participant <id> as <name>".
+ClassMethod SanitizeParticipantId(pName As %String) As %String
+{
+    Set out = ""
+    Set lenName = $Length(pName)
+    For i=1:1:lenName {
+        Set ch = $Extract(pName,i)
+        If (ch?1AN)!(ch="_")!(ch=".") {
+            Set out = out_ch
+        } Else {
+            Set out = out_"_"
+        }
+    }
+    If out="" {
+        Set out = "P"
+    }
+    Quit out
+}
+
+/// ST-005 helper — Resolve a participant name to its sanitized identifier
+ClassMethod PartId(ByRef pPartMap, pName As %String) As %String
+{
+    Quit:pName="" ""
+    Quit $Get(pPartMap(pName), ..SanitizeParticipantId(pName))
 }
 
 /// Helper — convert correlated %DynamicObject events into typed Event objects
@@ -298,6 +374,19 @@ ClassMethod ApplyLoopCompression(pEvents As %DynamicArray, Output pOutEvents As 
         ; Primary Label used for loop header; request label is canonical
         Set evLoop.Label = ev.Label
 
+        ; Preserve warnings from all compressed pairs (deduplicated) so that
+        ; compression never silently discards %% warning comments
+        Set tNotes = ""
+        For k=i:1:(i+(2*count)-1) {
+            Set e = pEvents.%Get(k)
+            Continue:'$IsObject(e)
+            Set n = e.Notes
+            Continue:n=""
+            Continue:tNotes[n
+            Set tNotes = tNotes_$Select(tNotes="":"", 1:" | ")_n
+        }
+        Set evLoop.Notes = tNotes
+
         Do pOutEvents.%Push(evLoop)
         Set i = i + (2*count)
     }
@@ -381,7 +470,7 @@ ClassMethod NormalizeLabelForMode(pText As %String, pLabelMode As %String = "ful
 }
 
 /// ST-006 helper — Emit a single event as a Mermaid line (with optional indentation)
-ClassMethod EmitEventLine(ByRef pLines As %String, pEvent As MALIB.Util.DiagramTool.Event, pRows As %DynamicArray, pLabelMode As %String, pIndent As %Integer = 0) As %Status
+ClassMethod EmitEventLine(ByRef pLines As %String, pEvent As MALIB.Util.DiagramTool.Event, pRows As %DynamicArray, pLabelMode As %String, pIndent As %Integer = 0, ByRef pPartMap) As %Status
 {
     Set tSC = $$$OK
     Quit:'$IsObject(pEvent) tSC
@@ -426,12 +515,12 @@ ClassMethod EmitEventLine(ByRef pLines As %String, pEvent As MALIB.Util.DiagramT
         Quit tSC
     }
 
-    Set pLines = pLines_$Char(13,10)_pad_src_" "_arrow_" "_dst_" : "_label
+    Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,src)_" "_arrow_" "_..PartId(.pPartMap,dst)_" : "_label
     Quit tSC
 }
 
 /// ST-004 helper — Emit loop request/response lines as plain arrows (no loop header)
-ClassMethod EmitLoopAsPlain(ByRef pLines As %String, pLoopEvent As MALIB.Util.DiagramTool.Event, pLabelMode As %String, pIndent As %Integer = 0) As %Status
+ClassMethod EmitLoopAsPlain(ByRef pLines As %String, pLoopEvent As MALIB.Util.DiagramTool.Event, pLabelMode As %String, pIndent As %Integer = 0, ByRef pPartMap) As %Status
 {
     Set tSC = $$$OK
     Quit:'$IsObject(pLoopEvent) tSC
@@ -454,17 +543,17 @@ ClassMethod EmitLoopAsPlain(ByRef pLines As %String, pLoopEvent As MALIB.Util.Di
     Set respArrow = pLoopEvent.RespArrow
 
     If (reqSrc'="")&&(reqDst'="") {
-        Set pLines = pLines_$Char(13,10)_pad_reqSrc_" "_reqArrow_" "_reqDst_" : "_reqLbl
+        Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,reqSrc)_" "_reqArrow_" "_..PartId(.pPartMap,reqDst)_" : "_reqLbl
     }
     If (respSrc'="")&&(respDst'="") {
-        Set pLines = pLines_$Char(13,10)_pad_respSrc_" "_respArrow_" "_respDst_" : "_respLbl
+        Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,respSrc)_" "_respArrow_" "_..PartId(.pPartMap,respDst)_" : "_respLbl
     }
 
     Quit tSC
 }
 
 /// ST-004 helper — Emit inner loop lines (indented request/response pair)
-ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util.DiagramTool.Event, pLabelMode As %String, pIndent As %Integer = 1) As %Status
+ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util.DiagramTool.Event, pLabelMode As %String, pIndent As %Integer = 1, ByRef pPartMap) As %Status
 {
     Set tSC = $$$OK
     Quit:'$IsObject(pLoopEvent) tSC
@@ -485,17 +574,17 @@ ClassMethod EmitLoopInnerLines(ByRef pLines As %String, pLoopEvent As MALIB.Util
     Set respArrow = pLoopEvent.RespArrow
 
     If (reqSrc'="")&&(reqDst'="") {
-        Set pLines = pLines_$Char(13,10)_pad_reqSrc_" "_reqArrow_" "_reqDst_" : "_reqLbl
+        Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,reqSrc)_" "_reqArrow_" "_..PartId(.pPartMap,reqDst)_" : "_reqLbl
     }
     If (respSrc'="")&&(respDst'="") {
-        Set pLines = pLines_$Char(13,10)_pad_respSrc_" "_respArrow_" "_respDst_" : "_respLbl
+        Set pLines = pLines_$Char(13,10)_pad_..PartId(.pPartMap,respSrc)_" "_respArrow_" "_..PartId(.pPartMap,respDst)_" : "_respLbl
     }
 
     Quit tSC
 }
 
 /// ST-008 helper — Emit a single event or ST-004 loop with optional indentation
-ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.DiagramTool.Event, pRows As %DynamicArray, pLabelMode As %String, pIndent As %Integer = 0) As %Status
+ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.DiagramTool.Event, pRows As %DynamicArray, pLabelMode As %String, pIndent As %Integer = 0, ByRef pPartMap) As %Status
 {
     Set tSC = $$$OK
     Quit:'$IsObject(pEvent) tSC
@@ -512,8 +601,13 @@ ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.Diagra
         Set count = +pEvent.LoopCount
         ; Defensive: if LoopCount<2, fall back to plain lines
         If count<2 {
-            Do ..EmitLoopAsPlain(.pLines, pEvent, pLabelMode, pIndent)
+            Do ..EmitLoopAsPlain(.pLines, pEvent, pLabelMode, pIndent, .pPartMap)
             Quit tSC
+        }
+
+        ; Warnings preserved from the compressed pairs
+        If pEvent.Notes'="" {
+            Set pLines = pLines_$Char(13,10)_pad_"%% "_pEvent.Notes
         }
 
         ; Loop header label respects label mode
@@ -526,7 +620,7 @@ ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.Diagra
         Set pLines = pLines_$Char(13,10)_pad_"loop "_count_" times "_loopLabel
 
         ; Emit inner request/response lines with indentation relative to this block
-        Do ..EmitLoopInnerLines(.pLines, pEvent, pLabelMode, pIndent+1)
+        Do ..EmitLoopInnerLines(.pLines, pEvent, pLabelMode, pIndent+1, .pPartMap)
 
         ; Close loop block
         Set pLines = pLines_$Char(13,10)_pad_"end"
@@ -534,7 +628,7 @@ ClassMethod EmitEventOrLoop(ByRef pLines As %String, pEvent As MALIB.Util.Diagra
     }
 
     ; Non-loop event — existing arrow emission behavior
-    Do ..EmitEventLine(.pLines, pEvent, pRows, pLabelMode, pIndent)
+    Do ..EmitEventLine(.pLines, pEvent, pRows, pLabelMode, pIndent, .pPartMap)
     Quit tSC
 }
 
@@ -581,7 +675,9 @@ ClassMethod BuildEpisodeSignatureFragment(pEvent As MALIB.Util.DiagramTool.Event
 
         Set line1 = reqSrc_"|"_reqArrow_"|"_reqDst_"|"_reqLbl_"|"_"LOOPREQ"_"|"_"LOOP"
         Set line2 = respSrc_"|"_respArrow_"|"_respDst_"|"_respLbl_"|"_"LOOPRESP"_"|"_"LOOP"
-        Set pFrag = line1_"||"_line2
+        ; Include the iteration count: episodes whose inner loops repeat a different
+        ; number of times are NOT identical and must not compress together
+        Set pFrag = line1_"||"_line2_"||LOOPCOUNT="_(+pEvent.LoopCount)
         Quit tSC
     }
 
@@ -739,6 +835,7 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
     Set tFirstReqSrc = ""
     Set tFirstReqDst = ""
     Set tFirstReqLabel = ""
+    Set tFirstReqArrow = ""
 
     For i=0:1:len-1 {
         Set e = pEvents.%Get(i)
@@ -752,11 +849,15 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
             Set tFirstReqSrc = e.Src
             Set tFirstReqDst = e.Dst
             Set tFirstReqLabel = e.Label
+            Set tFirstReqArrow = e.Arrow
             Quit
         }
     }
 
-    If tFirstReqId>0 {
+    ; Envelope handling requires a synchronous wrapper: only an inproc (->>)
+    ; first request contributes stack depth, so a queued wrapper must not
+    ; raise the target depth (no episode could ever open at depth 2)
+    If (tFirstReqId>0), (tFirstReqArrow="->>") {
         ; Heuristic: envelope wrappers are typically inbound XML messages into a top BP:
         ; - Label HS.Message.XMLMessage
         ; - Src ends with/contains ".Services"
@@ -809,7 +910,7 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
             }
 
             ; “Near end” heuristic: response is in the last 3 events
-            If tHasInnerReq, (tFirstRespIdx>(len-3)) {
+            If tHasInnerReq, (tFirstRespIdx>=(len-3)) {
                 Set tTargetDepth = 2
             }
         }
@@ -822,6 +923,10 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
     ; Current open episode (at tTargetDepth)
     Set tCurrentEp = ""
     Set tCurrentRootReqId = 0
+
+    ; When >0: the current episode is rooted at a queued request and closes when
+    ; the response with this ID is consumed (set only when the pairing is known)
+    Set tQueueCloseId = 0
 
     For i=0:1:len-1 {
         Set ev = pEvents.%Get(i)
@@ -844,10 +949,25 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
             Continue
         }
 
-        ; TRACE/LOG events: keep them inside the current episode when possible
+        ; TRACE/LOG events: keep them inside the current episode when possible.
+        ; When no episode is open, attach to the previous episode instead of
+        ; creating a standalone episode: a standalone trace episode would break
+        ; the contiguity of otherwise-identical episode runs, defeating
+        ; episode-level loop compression (signatures already ignore traces).
         If isTrace {
             If $IsObject(tCurrentEp) {
                 Do tCurrentEp.Events.%Push(ev)
+            } ElseIf pEpisodes.%Size()>0 {
+                Set epPrev = pEpisodes.%Get(pEpisodes.%Size()-1)
+                If $IsObject(epPrev), $IsObject(epPrev.Events) {
+                    Do epPrev.Events.%Push(ev)
+                } Else {
+                    Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                    Set epSingle.Events = ##class(%DynamicArray).%New()
+                    Set epSingle.Compressible = 0
+                    Do epSingle.Events.%Push(ev)
+                    Do pEpisodes.%Push(epSingle)
+                }
             } Else {
                 Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
                 Set epSingle.Events = ##class(%DynamicArray).%New()
@@ -866,10 +986,25 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
 
             ; Inproc requests affect depth and participate in stack grouping
             If isInproc {
+                ; Unwind abandoned frames: in synchronous semantics only the target
+                ; of the innermost open call can issue the next inproc request. A
+                ; frame whose Dst is not this request's Src was never answered —
+                ; without this, one unanswered request permanently inflates depth
+                ; and every later episode is swallowed into one giant episode.
+                While (tDepth>0), ($Get(tReqDst(tDepth))'=ev.Src) {
+                    If (+$Get(tReqId(tDepth))=tCurrentRootReqId), (tCurrentRootReqId'=0) {
+                        Set tCurrentEp = ""
+                        Set tCurrentRootReqId = 0
+                    }
+                    Kill tReqId(tDepth), tReqSrc(tDepth), tReqDst(tDepth)
+                    Set tDepth = tDepth - 1
+                }
+
                 Set callLevel = tDepth + 1
 
-                ; Start a new episode only at the target depth
-                If callLevel=tTargetDepth {
+                ; Start a new episode only at the target depth (and never while a
+                ; queue-rooted episode is still open — those events belong to it)
+                If (callLevel=tTargetDepth), (tQueueCloseId=0) {
                     Set ep = ##class(MALIB.Util.DiagramTool.Episode).%New()
                     Set ep.Events = ##class(%DynamicArray).%New()
                     Set ep.Compressible = 1
@@ -904,6 +1039,23 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
             ; Keep them inside the current episode when possible.
             If $IsObject(tCurrentEp) {
                 Do tCurrentEp.Events.%Push(ev)
+            } ElseIf (tDepth=0), (+ev.PairWithID>0) {
+                ; Queue-rooted episode: a queued request with a known paired
+                ; response opens a compressible episode that closes when that
+                ; response is consumed. This lets repeated async units (queued
+                ; request ... queued response) compress at the episode level.
+                Set ep = ##class(MALIB.Util.DiagramTool.Episode).%New()
+                Set ep.Events = ##class(%DynamicArray).%New()
+                Set ep.Compressible = 1
+                Set ep.RootSrc = ev.Src
+                Set ep.RootDst = ev.Dst
+
+                Do ep.Events.%Push(ev)
+                Do pEpisodes.%Push(ep)
+
+                Set tCurrentEp = ep
+                Set tCurrentRootReqId = +ev.ID
+                Set tQueueCloseId = +ev.PairWithID
             } Else {
                 Set epSingle = ##class(MALIB.Util.DiagramTool.Episode).%New()
                 Set epSingle.Events = ##class(%DynamicArray).%New()
@@ -927,29 +1079,48 @@ ClassMethod BuildEpisodes(pEvents As %DynamicArray, Output pEpisodes As %Dynamic
                 Do pEpisodes.%Push(epSingle)
             }
 
+            ; Close a queue-rooted episode when its designated response arrives
+            If (tQueueCloseId>0), (+ev.ID=tQueueCloseId) {
+                Set tCurrentEp = ""
+                Set tCurrentRootReqId = 0
+                Set tQueueCloseId = 0
+            }
+
             ; Determine inproc using arrow semantics only.
             ; (Invocation may be MultiDimensional on some builds.)
             Set isInproc = (ev.Arrow="->>")
 
-            ; Pop the inproc stack when the response matches the current top frame
+            ; Pop the inproc stack down to the frame this response answers.
+            ; Frames above the matched one were never answered (abandoned).
             If isInproc, (tDepth>0) {
-                Set topReqId = +$Get(tReqId(tDepth))
-                Set topSrc = $Get(tReqSrc(tDepth))
-                Set topDst = $Get(tReqDst(tDepth))
-
-                Set match = 0
-                If (+ev.PairWithID>0), (+ev.PairWithID=topReqId) {
-                    Set match = 1
-                } ElseIf (ev.Src=topDst)&(ev.Dst=topSrc) {
-                    Set match = 1
+                Set matchDepth = 0
+                If +ev.PairWithID>0 {
+                    For d=tDepth:-1:1 {
+                        If +$Get(tReqId(d))=+ev.PairWithID {
+                            Set matchDepth = d
+                            Quit
+                        }
+                    }
+                }
+                If matchDepth=0 {
+                    ; Endpoint fallback applies to the top frame only
+                    If (ev.Src=$Get(tReqDst(tDepth)))&&(ev.Dst=$Get(tReqSrc(tDepth))) {
+                        Set matchDepth = tDepth
+                    }
                 }
 
-                If match {
-                    Kill tReqId(tDepth), tReqSrc(tDepth), tReqDst(tDepth)
-                    Set tDepth = tDepth - 1
+                If matchDepth>0 {
+                    Set closeCur = 0
+                    For d=tDepth:-1:matchDepth {
+                        If (+$Get(tReqId(d))=tCurrentRootReqId), (tCurrentRootReqId'=0) {
+                            Set closeCur = 1
+                        }
+                        Kill tReqId(d), tReqSrc(d), tReqDst(d)
+                    }
+                    Set tDepth = matchDepth - 1
 
                     ; If we just closed the root request for the current episode, close the episode
-                    If $IsObject(tCurrentEp), (topReqId=tCurrentRootReqId) {
+                    If closeCur, (tQueueCloseId=0) {
                         Set tCurrentEp = ""
                         Set tCurrentRootReqId = 0
                     }
@@ -1048,6 +1219,36 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
         Set blk.Type = "LOOP"
         Set blk.LoopCount = count
         Set blk.Episode = ep
+
+        ; Preserve warnings from the non-canonical episodes in the run (the
+        ; canonical episode renders its own notes inline); deduplicated
+        Set tAggNotes = ""
+        Kill tNoteSeen
+        Set evArrC = ep.Events
+        If $IsObject(evArrC) {
+            For k=0:1:evArrC.%Size()-1 {
+                Set e = evArrC.%Get(k)
+                Continue:'$IsObject(e)
+                Continue:e.Notes=""
+                Set tNoteSeen($ZCRC(e.Notes,7)) = 1
+            }
+        }
+        For r=i+1:1:i+count-1 {
+            Set epN = pEpisodes.%Get(r)
+            Continue:'$IsObject(epN)
+            Set evArrN = epN.Events
+            Continue:'$IsObject(evArrN)
+            For k=0:1:evArrN.%Size()-1 {
+                Set e = evArrN.%Get(k)
+                Continue:'$IsObject(e)
+                Continue:e.Notes=""
+                Continue:$Data(tNoteSeen($ZCRC(e.Notes,7)))
+                Set tNoteSeen($ZCRC(e.Notes,7)) = 1
+                Set tAggNotes = tAggNotes_$Select(tAggNotes="":"", 1:" | ")_e.Notes
+            }
+        }
+        Set blk.Notes = tAggNotes
+
         Do pBlocks.%Push(blk)
 
         Set i = i + count
@@ -1057,7 +1258,7 @@ ClassMethod CompressEpisodesToBlocks(pEpisodes As %DynamicArray, Output pBlocks 
 }
 
 /// ST-008 helper — Emit episode blocks (episodes and episode-level loops)
-ClassMethod EmitEpisodeBlocks(ByRef pLines As %String, pBlocks As %DynamicArray, pRows As %DynamicArray, pLabelMode As %String) As %Status
+ClassMethod EmitEpisodeBlocks(ByRef pLines As %String, pBlocks As %DynamicArray, pRows As %DynamicArray, pLabelMode As %String, ByRef pPartMap) As %Status
 {
     Set tSC = $$$OK
     Quit:'$IsObject(pBlocks) tSC
@@ -1085,6 +1286,11 @@ ClassMethod EmitEpisodeBlocks(ByRef pLines As %String, pBlocks As %DynamicArray,
                     Continue
                 }
 
+                ; Warnings preserved from the non-canonical episodes in this run
+                If blk.Notes'="" {
+                    Set pLines = pLines_$Char(13,10)_"%% "_blk.Notes
+                }
+
                 Set repLabel = ep.RepLabel
                 Set loopLabel = ..NormalizeLabelForMode(repLabel, pLabelMode)
                 If loopLabel="" {
@@ -1101,7 +1307,7 @@ ClassMethod EmitEpisodeBlocks(ByRef pLines As %String, pBlocks As %DynamicArray,
                     For j=0:1:evLen-1 {
                         Set ev = evArr.%Get(j)
                         Continue:'$IsObject(ev)
-                        Do ..EmitEventOrLoop(.pLines, ev, pRows, pLabelMode, 1)
+                        Do ..EmitEventOrLoop(.pLines, ev, pRows, pLabelMode, 1, .pPartMap)
                     }
                 }
 
@@ -1123,7 +1329,7 @@ ClassMethod EmitEpisodeBlocks(ByRef pLines As %String, pBlocks As %DynamicArray,
             For j=0:1:evLen-1 {
                 Set ev = evArr.%Get(j)
                 Continue:'$IsObject(ev)
-                Do ..EmitEventOrLoop(.pLines, ev, pRows, pLabelMode, 0)
+                Do ..EmitEventOrLoop(.pLines, ev, pRows, pLabelMode, 0, .pPartMap)
             }
         }
     }
@@ -1181,7 +1387,9 @@ ClassMethod AppendDiagramsToFile(pOutFile As %String, ByRef pDiagMap) As %Status
         Do stream.WriteLine("")
     }
 
-    Do stream.Flush()
+    ; %Save is required to persist a linked %Stream.FileCharacter — Flush alone
+    ; discards the buffered content and the file is never written
+    Set tSC = stream.%Save()
     Quit tSC
 }
 

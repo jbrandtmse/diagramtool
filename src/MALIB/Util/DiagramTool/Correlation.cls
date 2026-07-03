@@ -28,6 +28,31 @@ ClassMethod ArrowForInvocation(pInvocation As %String = "") As %String
         Quit "->>"
 }
 
+/// Normalize a row's Type to logical "REQUEST"/"RESPONSE" (uppercase).
+/// Handles string forms, numeric enum values (Ens.DataType.MessageType), and a
+/// heuristic fallback (rows with CorrespondingMessageId are treated as responses).
+ClassMethod NormalizeTypeU(pRow As %DynamicObject) As %String
+{
+        Quit:'$IsObject(pRow) ""
+        Set tType = pRow.%Get("Type")
+        Set tTypeU = $ZCONVERT(tType,"U")
+        If (tTypeU="REQUEST")!(tTypeU="RESPONSE") {
+            Quit tTypeU
+        }
+        Set tTypeNum = +tType
+        If tTypeNum=$$$eMessageTypeRequest {
+            Quit "REQUEST"
+        }
+        If tTypeNum=$$$eMessageTypeResponse {
+            Quit "RESPONSE"
+        }
+        ; Heuristic fallback for SQL-loaded rows: infer from CorrMsgId
+        If pRow.%Get("CorrespondingMessageId")'="" {
+            Quit "RESPONSE"
+        }
+        Quit "REQUEST"
+}
+
 /// Correlate request/response events according to ST-003 rules.
 /// Forward-only scan; warnings recorded in Notes; preserves row order by emitting responses when encountered.
 ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicArray) As %Status
@@ -43,25 +68,7 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
         For i=0:1:len-1 {
             Set r = pRows.%Get(i)
             Continue:'$IsObject(r)
-            Set tType = r.%Get("Type")
-            Set tTypeU = $ZCONVERT(tType,"U")
-            ; Normalize Type to logical REQUEST/RESPONSE even when stored as enum
-            If (tTypeU'="REQUEST")&&(tTypeU'="RESPONSE") {
-                Set tTypeNum = +tType
-                If tTypeNum=$$$eMessageTypeRequest {
-                    Set tTypeU = "REQUEST"
-                } ElseIf tTypeNum=$$$eMessageTypeResponse {
-                    Set tTypeU = "RESPONSE"
-                } Else {
-                    ; Heuristic fallback for SQL-loaded rows: infer from CorrMsgId
-                    Set tCorr = r.%Get("CorrespondingMessageId")
-                    If tCorr'="" {
-                        Set tTypeU = "RESPONSE"
-                    } Else {
-                        Set tTypeU = "REQUEST"
-                    }
-                }
-            }
+            Set tTypeU = ..NormalizeTypeU(r)
 
             ; Handle Requests
             If (tTypeU="REQUEST") {
@@ -77,28 +84,8 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                     }
                 }
 
-                ; Start with enum-based mode, then apply heuristics
+                ; Strict enum-based mode (PRD: Inproc -> sync, Queue -> async, unknown -> sync + warning)
                 Set mode = invU
-
-                ; Heuristic: SQL-loaded rows that look like inproc (no ReturnQueueName,
-                ; with a future response whose CorrMsgId matches this ID) should be
-                ; treated as INPROC even if Invocation enum says QUEUE.
-                If mode="QUEUE", r.%Get("ReturnQueueName")="" {
-                    Set reqID = r.%Get("ID")
-                    Set foundRespCorr = 0
-                    For j=i+1:1:len-1 {
-                        Set c = pRows.%Get(j)
-                        Continue:'$IsObject(c)
-                        Set cCorr = c.%Get("CorrespondingMessageId")
-                        If (+cCorr)=+reqID {
-                            Set foundRespCorr = 1
-                            Quit
-                        }
-                    }
-                    If foundRespCorr {
-                        Set mode = "INPROC"
-                    }
-                }
 
                 Set arrowReq = ..ArrowForInvocation(mode)
                 Set note = ""
@@ -123,14 +110,13 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                 Do evReq.%Set("PairId","")
                 Do pEvents.%Push(evReq)
 
-                ; Inproc: mark first reversed-endpoint response ahead
-                If mode="INPROC" {
+                ; Inproc (and unknown modes defaulted to sync): mark first reversed-endpoint response ahead
+                If mode'="QUEUE" {
                     Set found=0
                     For j=i+1:1:len-1 {
                         Set c = pRows.%Get(j)
                         Continue:'$IsObject(c)
-                        Set cTypeU = $ZCONVERT(c.%Get("Type"),"U")
-                        Continue:cTypeU'="RESPONSE"
+                        Continue:..NormalizeTypeU(c)'="RESPONSE"
                         Set cSrc = c.%Get("SourceConfigName")
                         Set cDst = c.%Get("TargetConfigName")
                         If (cSrc=r.%Get("TargetConfigName"))&(cDst=r.%Get("SourceConfigName")) {
@@ -149,6 +135,8 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                                 Set pairArrowByResp(cID) = "->>"
                                 Set pairIdByResp(cID) = nextPairId
                                 Set pairIdByReq(r.%Get("ID")) = nextPairId
+                                Do evReq.%Set("PairWithID",cID)
+                                Do evReq.%Set("PairId",nextPairId)
                                 Set nextPairId = nextPairId + 1
                                 Set usedResp(cID)=1
                                 Set found=1
@@ -168,16 +156,17 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                     For j=i+1:1:len-1 {
                         Set c = pRows.%Get(j)
                         Continue:'$IsObject(c)
-                        Set cTypeU = $ZCONVERT(c.%Get("Type"),"U")
-                        Continue:cTypeU'="RESPONSE"
+                        Continue:..NormalizeTypeU(c)'="RESPONSE"
                         Set cID = c.%Get("ID")
                         Continue:$Get(usedResp(cID))
                         Set cCorr = c.%Get("CorrespondingMessageId")
-                        If (cCorr'="")&(cCorr=reqID) {
+                        If (cCorr'="")&(+cCorr=+reqID) {
                             Set pairReqByResp(cID) = reqID
                             Set pairArrowByResp(cID) = "-->>"
                             Set pairIdByResp(cID) = nextPairId
                             Set pairIdByReq(reqID) = nextPairId
+                            Do evReq.%Set("PairWithID",cID)
+                            Do evReq.%Set("PairId",nextPairId)
                             Set nextPairId = nextPairId + 1
                             Set usedResp(cID)=1
                             Set found=1
@@ -190,8 +179,7 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                         For j=i+1:1:len-1 {
                             Set c = pRows.%Get(j)
                             Continue:'$IsObject(c)
-                            Set cTypeU = $ZCONVERT(c.%Get("Type"),"U")
-                            Continue:cTypeU'="RESPONSE"
+                            Continue:..NormalizeTypeU(c)'="RESPONSE"
                             Set cID = c.%Get("ID")
                             Continue:$Get(usedResp(cID))
                             Set cRQN = c.%Get("ReturnQueueName")
@@ -203,6 +191,8 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                                 Set pairArrowByResp(cID) = "-->>"
                                 Set pairIdByResp(cID) = nextPairId
                                 Set pairIdByReq(reqID) = nextPairId
+                                Do evReq.%Set("PairWithID",cID)
+                                Do evReq.%Set("PairId",nextPairId)
                                 Set nextPairId = nextPairId + 1
                                 Set usedResp(cID)=1
                                 Set found=1
@@ -247,7 +237,7 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                     Do evResp.%Set("PairId",$Get(pairIdByResp(respID),""))
                     Do pEvents.%Push(evResp)
                 } Else {
-                    ; Best-effort standalone Inproc response
+                    ; Best-effort standalone response (never silently drop a message row)
                     Set invU = $ZCONVERT(r.%Get("Invocation"),"U")
                     ; Normalize numeric invocation codes here as well (Ens.DataType.MessageInvocation: 1=Queue, 2=Inproc)
                     If invU?1.N {
@@ -258,23 +248,28 @@ ClassMethod CorrelateEvents(pRows As %DynamicArray, Output pEvents As %DynamicAr
                             Set invU = "QUEUE"
                         }
                     }
-                    If invU="INPROC" {
-                        Set evResp = ##class(%DynamicObject).%New()
-                        Do evResp.%Set("EventType","Response")
-                        Do evResp.%Set("Src",r.%Get("SourceConfigName"))
-                        Do evResp.%Set("Dst",r.%Get("TargetConfigName"))
-                        Do evResp.%Set("Label",r.%Get("MessageBodyClassName"))
-                        Do evResp.%Set("Arrow","->>")
-                        Do evResp.%Set("Invocation",r.%Get("Invocation"))
-                        Do evResp.%Set("ID",r.%Get("ID"))
-                        Do evResp.%Set("PairWithID","")
-                        Do evResp.%Set("CorrespondingMessageId",r.%Get("CorrespondingMessageId"))
-                        Do evResp.%Set("ReturnQueueName",r.%Get("ReturnQueueName"))
-                        Do evResp.%Set("SessionId",r.%Get("SessionId"))
-                        Do evResp.%Set("Notes","Warning: Unpaired inproc response at ID="_r.%Get("ID")_"; no matching request found")
-                        Do evResp.%Set("PairId","")
-                        Do pEvents.%Push(evResp)
+                    If invU="QUEUE" {
+                        Set respArrow = "-->>"
+                        Set respWarn = "Warning: Unpaired queued response at ID="_r.%Get("ID")_"; no matching request found"
+                    } Else {
+                        Set respArrow = "->>"
+                        Set respWarn = "Warning: Unpaired inproc response at ID="_r.%Get("ID")_"; no matching request found"
                     }
+                    Set evResp = ##class(%DynamicObject).%New()
+                    Do evResp.%Set("EventType","Response")
+                    Do evResp.%Set("Src",r.%Get("SourceConfigName"))
+                    Do evResp.%Set("Dst",r.%Get("TargetConfigName"))
+                    Do evResp.%Set("Label",r.%Get("MessageBodyClassName"))
+                    Do evResp.%Set("Arrow",respArrow)
+                    Do evResp.%Set("Invocation",r.%Get("Invocation"))
+                    Do evResp.%Set("ID",r.%Get("ID"))
+                    Do evResp.%Set("PairWithID","")
+                    Do evResp.%Set("CorrespondingMessageId",r.%Get("CorrespondingMessageId"))
+                    Do evResp.%Set("ReturnQueueName",r.%Get("ReturnQueueName"))
+                    Do evResp.%Set("SessionId",r.%Get("SessionId"))
+                    Do evResp.%Set("Notes",respWarn)
+                    Do evResp.%Set("PairId","")
+                    Do pEvents.%Push(evResp)
                 }
             }
         }

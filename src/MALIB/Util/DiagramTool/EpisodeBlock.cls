@@ -16,4 +16,10 @@ Property LoopCount As %Integer;
 /// inside the loop. For Type="EPISODE" this is the single episode to emit.
 Property Episode As MALIB.Util.DiagramTool.Episode;
 
+/// For Type="LOOP": warnings collected from the non-canonical episodes in the
+/// compressed run (the canonical episode renders its own notes inline). Joined
+/// with " | " and emitted as a %% comment before the loop header so that
+/// compression never silently discards warnings.
+Property Notes As %String(MAXLEN = "");
+
 }

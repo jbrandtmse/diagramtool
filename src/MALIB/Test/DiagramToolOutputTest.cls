@@ -766,4 +766,168 @@ Method TestST008EpisodeLoopCompressionWithEnvelopeWrapper() As %Status
     Quit $$$OK
 }
 
+/// ST-008 regression: episodes identical except for inner pair-loop count must NOT
+/// be compressed together (the diagram would misstate the number of messages).
+Method TestST008EpisodeLoopCountDifferencePreventsCompression() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108020
+
+    ; Episode 1: outer pair with 3 identical inner pairs
+    Do ..PushRow(rows, ..NewRow(9101, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.CntOuter", sess))
+    Do ..PushRow(rows, ..NewRow(9102, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.CntInner", sess))
+    Do ..PushRow(rows, ..NewRow(9103, "Inproc", "Response", "C", "B", "", 9102, "Unit.Test.ST008.CntInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9104, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.CntInner", sess))
+    Do ..PushRow(rows, ..NewRow(9105, "Inproc", "Response", "C", "B", "", 9104, "Unit.Test.ST008.CntInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9106, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.CntInner", sess))
+    Do ..PushRow(rows, ..NewRow(9107, "Inproc", "Response", "C", "B", "", 9106, "Unit.Test.ST008.CntInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9108, "Inproc", "Response", "B", "A", "", 9101, "Unit.Test.ST008.CntOuterResp", sess))
+
+    ; Episode 2: same shape but only 2 inner pairs
+    Do ..PushRow(rows, ..NewRow(9111, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.CntOuter", sess))
+    Do ..PushRow(rows, ..NewRow(9112, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.CntInner", sess))
+    Do ..PushRow(rows, ..NewRow(9113, "Inproc", "Response", "C", "B", "", 9112, "Unit.Test.ST008.CntInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9114, "Inproc", "Request",  "B", "C", "", "", "Unit.Test.ST008.CntInner", sess))
+    Do ..PushRow(rows, ..NewRow(9115, "Inproc", "Response", "C", "B", "", 9114, "Unit.Test.ST008.CntInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9116, "Inproc", "Response", "B", "A", "", 9111, "Unit.Test.ST008.CntOuterResp", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008 loop-count regression BuildDiagramForSession OK")
+
+    ; The two episodes differ (3x vs 2x inner loop) and must not merge
+    Do $$$AssertTrue('(diag["loop 2 times Unit.Test.ST008.CntOuter"), "st.008 episodes with differing inner loop counts are not compressed together")
+
+    ; Both inner loop counts must be visible in the output
+    Do $$$AssertTrue(diag["loop 3 times Unit.Test.ST008.CntInner", "st.008 inner loop of 3 preserved")
+    Do $$$AssertTrue(diag["loop 2 times Unit.Test.ST008.CntInner", "st.008 inner loop of 2 preserved")
+
+    Quit $$$OK
+}
+
+/// ST-008 regression: one unanswered inproc request must not destroy episode-level
+/// compression of the identical episodes that follow it (depth-stack recovery).
+Method TestST008DepthRecoveryAfterUnansweredRequest() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108021
+
+    ; Stray request with no response
+    Do ..PushRow(rows, ..NewRow(9201, "Inproc", "Request", "A", "X", "", "", "Unit.Test.ST008.Stray", sess))
+
+    ; Two identical multi-event episodes (immune to ST-004 pair compression)
+    Do ..PushRow(rows, ..NewRow(9202, "Inproc", "Request",  "A", "C", "", "", "Unit.Test.ST008.RecOuter", sess))
+    Do ..PushRow(rows, ..NewRow(9203, "Inproc", "Request",  "C", "D", "", "", "Unit.Test.ST008.RecInner", sess))
+    Do ..PushRow(rows, ..NewRow(9204, "Inproc", "Response", "D", "C", "", 9203, "Unit.Test.ST008.RecInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9205, "Inproc", "Response", "C", "A", "", 9202, "Unit.Test.ST008.RecOuterResp", sess))
+
+    Do ..PushRow(rows, ..NewRow(9206, "Inproc", "Request",  "A", "C", "", "", "Unit.Test.ST008.RecOuter", sess))
+    Do ..PushRow(rows, ..NewRow(9207, "Inproc", "Request",  "C", "D", "", "", "Unit.Test.ST008.RecInner", sess))
+    Do ..PushRow(rows, ..NewRow(9208, "Inproc", "Response", "D", "C", "", 9207, "Unit.Test.ST008.RecInnerResp", sess))
+    Do ..PushRow(rows, ..NewRow(9209, "Inproc", "Response", "C", "A", "", 9206, "Unit.Test.ST008.RecOuterResp", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008 depth-recovery BuildDiagramForSession OK")
+
+    ; The stray request is still rendered
+    Do $$$AssertTrue(diag["A ->> X : Unit.Test.ST008.Stray", "st.008 stray request still rendered")
+
+    ; The two identical episodes after the stray request still compress
+    Do $$$AssertTrue(diag["loop 2 times Unit.Test.ST008.RecOuter", "st.008 episodes after unanswered request still compress into loop 2 times")
+
+    Quit $$$OK
+}
+
+/// ST-008 regression: a trace/log event BETWEEN two identical episodes must not
+/// break the contiguity of the episode run (signatures already ignore traces).
+Method TestST008TraceBetweenEpisodesStillCompresses() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9108022
+
+    Do ..PushRow(rows, ..NewRow(9301, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.TBReq", sess))
+    Do ..PushRow(rows, ..NewRow(9302, "Inproc", "Response", "B", "A", "", 9301, "Unit.Test.ST008.TBResp", sess))
+
+    ; Trace event between the two episodes (kept by the loader filter)
+    Do ..PushRow(rows, ..NewRow(9303, "Inproc", "Request", "A", "Z", "", "", "HS.Util.Trace.Response", sess))
+
+    Do ..PushRow(rows, ..NewRow(9304, "Inproc", "Request",  "A", "B", "", "", "Unit.Test.ST008.TBReq", sess))
+    Do ..PushRow(rows, ..NewRow(9305, "Inproc", "Response", "B", "A", "", 9304, "Unit.Test.ST008.TBResp", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.008 trace-between BuildDiagramForSession OK")
+
+    ; The repeated pair compresses at episode level despite the interleaved trace
+    Do $$$AssertTrue(diag["loop 2 times Unit.Test.ST008.TBReq", "st.008 trace between repeats does not defeat episode loop compression")
+
+    ; The trace line itself is still rendered (inside the loop body)
+    Do $$$AssertTrue(diag["HS.Util.Trace.Response", "st.008 trace event still rendered")
+
+    Quit $$$OK
+}
+
+/// ST-005 regression: participant names with Mermaid-hostile characters are
+/// sanitized to safe identifiers with the original names preserved as labels.
+Method TestST005ParticipantSanitization() As %Status
+{
+    Set rows = ..NewRowsArray()
+    Set sess = 9105020
+
+    Do ..PushRow(rows, ..NewRow(9401, "Inproc", "Request",  "HL7 In Router", "ADT (Main) Process", "", "", "Unit.Test.ST005.SanReq", sess))
+    Do ..PushRow(rows, ..NewRow(9402, "Inproc", "Response", "ADT (Main) Process", "HL7 In Router", "", 9401, "Unit.Test.ST005.SanResp", sess))
+
+    Set diag = ""
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).BuildDiagramForSession(sess, rows, "full", .diag)
+    Do $$$AssertStatusOK(tSC, "st.005 sanitize BuildDiagramForSession OK")
+
+    ; Declarations use sanitized ids with the original names as display labels
+    Do $$$AssertTrue(diag["participant HL7_In_Router as HL7 In Router", "st.005 sanitized declaration for spaced name")
+    Do $$$AssertTrue(diag["participant ADT__Main__Process as ADT (Main) Process", "st.005 sanitized declaration for parenthesized name")
+
+    ; Message lines use the sanitized ids
+    Do $$$AssertTrue(diag["HL7_In_Router ->> ADT__Main__Process : Unit.Test.ST005.SanReq", "st.005 request line uses sanitized ids")
+    Do $$$AssertTrue(diag["ADT__Main__Process ->> HL7_In_Router : Unit.Test.ST005.SanResp", "st.005 response line uses sanitized ids")
+
+    ; Simple names remain unchanged (no alias emitted)
+    Do $$$AssertTrue('(diag["HL7 In Router ->>"), "st.005 raw spaced name not used in message lines")
+
+    Quit $$$OK
+}
+
+/// ST-005 regression: AppendDiagramsToFile must actually persist appended content
+/// (requires %Save on the linked file stream; Flush alone discards everything).
+Method TestST005AppendDiagramsToFilePersists() As %Status
+{
+    Set outFile = ##class(%File).TempFilename("txt")
+    Do $$$AssertTrue(outFile'="", "st.005 append-persist temp filename allocated")
+
+    Kill diagMap
+    Set diagMap(1) = "sequenceDiagram"_$Char(13,10)_"%% Session 424201"_$Char(13,10)_"A ->> B : Unit.Test.ST005.AppendBody"
+
+    ; First append creates the file with one diagram
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).AppendDiagramsToFile(outFile, .diagMap)
+    Do $$$AssertStatusOK(tSC, "st.005 append-persist first append OK")
+
+    ; Second append must preserve prior content and add a divider
+    Set tSC = ##class(MALIB.Util.DiagramTool.Output).AppendDiagramsToFile(outFile, .diagMap)
+    Do $$$AssertStatusOK(tSC, "st.005 append-persist second append OK")
+
+    Set stream = ##class(%Stream.FileCharacter).%New()
+    Set tSC = stream.LinkToFile(outFile)
+    Do $$$AssertStatusOK(tSC, "st.005 append-persist read-back link OK")
+    Set content = ""
+    While 'stream.AtEnd {
+        Set content = content_stream.Read(32000)
+    }
+
+    Set bodyCount = $Length(content, "Unit.Test.ST005.AppendBody")-1
+    Do $$$AssertEquals(bodyCount, 2, "st.005 append-persist both appended diagrams present in file")
+    Do $$$AssertTrue(content["%% ---", "st.005 append-persist divider present between appended diagrams")
+
+    Do ##class(%File).Delete(outFile)
+    Quit $$$OK
+}
+
 }

@@ -99,8 +99,11 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
    - Algorithm (T7 — Depth-Aware Episode Grouping):
      - Uses a stack/depth approach for INPROC (`->>`) calls to handle nested call patterns.
      - Emits episodes at **target depth** (normally 1, but 2 when an "envelope wrapper" session is detected).
-     - Envelope detection heuristics: first request label is `HS.Message.XMLMessage`, or source ends with `.Services` and destination ends with `.Process`, with response near the end.
+     - Envelope detection heuristics: first request label is `HS.Message.XMLMessage`, or source ends with `.Services` and destination ends with `.Process`, with response within the last 3 events. The wrapper request must be inproc (`->>`); a queued wrapper never raises the target depth (it contributes no stack depth).
+     - **Stack recovery (abandoned frames)**: in synchronous semantics only the target of the innermost open call can issue the next inproc request. When a new inproc request's `Src` does not match the top frame's `Dst`, the stack unwinds those abandoned (unanswered) frames; likewise a response that answers a deeper frame pops everything above it. This prevents one unanswered request from permanently inflating depth and swallowing all later episodes into one giant episode.
+     - **Queue-rooted episodes**: a queued (`-->>`) request arriving at depth 0 with a known paired response opens a compressible episode that closes when that response is consumed — repeated async units (queued request … queued response, including inner sync work) compress at the episode level.
      - ST-004 Loop events are treated as atomic and do not affect nesting depth.
+     - Trace/log events arriving **between** episodes attach to the previous episode instead of forming standalone episodes, so they cannot break the contiguity of otherwise-identical episode runs.
      - Nested events remain inside the current episode rather than starting new top-level episodes.
 
 ## Key Decisions (aligned with PRD v4)
@@ -127,6 +130,10 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
   - Unknown Invocation → default to `->>` with `"Warning: Unknown Invocation ...; defaulting to sync (->>)"`.
   - Inproc CorrMsgId conflict → `"Warning: CorrMsgId conflict between ReqID=... and RespID=...; using order-based pairing"`.
   - Unpaired queued request → `"Warning: Unpaired queued request at ID=...; missing or unmatched CorrMsgId/ReturnQueueName"`.
+  - Unpaired response (any invocation) → emitted **standalone** (never silently dropped) with `"Warning: Unpaired inproc|queued response at ID=...; no matching request found"`; queued standalone responses keep the async arrow.
+- Warnings survive compression:
+  - ST-004 loop events carry the deduplicated `Notes` of all compressed pairs and render them as a `%%` comment before the `loop` header.
+  - Episode-level loop blocks aggregate `Notes` from the non-canonical episodes in the run (the canonical episode renders its own notes inline) and emit them before the loop header.
 - Rendering:
   - Warnings are stored on events as `Notes` and rendered by ST-005 as **Mermaid comments**:
     - `%% <warning text>`
@@ -154,6 +161,10 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 
 ### Participants and Ordering (ST-007)
 
+- Identifier sanitization (ST-005/PRD):
+  - Participant identifiers keep alphanumerics, `_` and `.`; every other character becomes `_`.
+  - When sanitization changes a name, the original is preserved as the display label via `participant <id> as <original name>`; message lines use the sanitized id.
+  - Distinct names that sanitize to the same id get deterministic `_2`, `_3`, … suffixes by first appearance.
 - Source of truth:
   - Participants are derived from the correlated/loop-compressed event stream (ST-003 + ST-004).
   - Endpoints used:
@@ -176,7 +187,7 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 - Signature semantics:
   - Episode signatures are computed only from **business events**:
     - Per-event fragments for normal events: `Src | Arrow | Dst | Label(full) | EventType`.
-    - Per-event fragments for LOOP events expand to two logical lines: request and response fragments with `LOOPREQ`/`LOOPRESP` markers.
+    - Per-event fragments for LOOP events expand to two logical lines: request and response fragments with `LOOPREQ`/`LOOPRESP` markers, plus the loop's **iteration count** (`LOOPCOUNT=N`) — episodes whose inner loops repeat a different number of times are not identical and must not compress together.
     - **Note:** Invocation is intentionally excluded from signature fragments because `Event.Invocation` may be MultiDimensional on some IRIS builds; arrow semantics distinguish Inproc vs Queue.
     - Trace/log events (e.g. `HS.Util.Trace.*`) are excluded from the signature but kept in the episode body for rendering.
   - Two episodes are equal when their business-event fragment sequences are identical.
@@ -330,6 +341,7 @@ Related: docs/prd.md (v4 shards), docs/stories/story-003-correlation-rules.md, d
 
 ## Change Log
 
+- v0.6 Bug-fix pass: episode signatures include inner loop counts; depth-stack recovery for abandoned inproc frames; queue-rooted episodes; trace events between episodes attach to the previous episode; envelope detection requires an inproc wrapper and uses the true last-3-events window; removed the undocumented QUEUE→INPROC reclassification (strict PRD arrows); Type normalization applied to correlation inner scans; unpaired responses of any invocation emitted standalone with warnings; warnings preserved through pair- and episode-level compression; participant identifier sanitization with `as` labels and collision suffixes; AppendDiagramsToFile now persists via %Save; dedup hash-collision handling keeps all keys; ClineDebug renamed to MALIB.Util.DiagramTool.ClineDebug.
 - v0.5 Added ConvertDynamicToEvents pipeline step; documented Event.Invocation MultiDimensional caveat; detailed T7 depth-aware episode grouping algorithm; clarified episode signature fragment format; added ClineDebug utility documentation.
 - v0.4 Cleaned up inline debug statements throughout codebase; removed deprecated DebugDumpHeaders and TestST006HeaderDebug.
 - v0.2 Documented ST-004 loop compression and ST-005 output/dedup/label/warning behavior; aligned with ST-006 orchestration and tests.
